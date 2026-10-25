@@ -1,0 +1,71 @@
+rules_version = '2';
+
+// QR Tracker - Firestore security rules.
+// ADMIN_EMAIL below must match ADMIN_EMAIL in index.html.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.token.email; }
+    function isAdmin() { return signedIn() && me() == 'admin@qrtracker.app'; }
+
+    // Global settings, QR list and original QR photos: everyone reads, only owner changes.
+    match /settings/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /qrs/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+    match /qrImages/{id} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // Monthly running totals per QR, and remark counters. Every branch
+    // updates these inside transactions when it reserves / receives.
+    match /totals/{id} {
+      allow read, write: if signedIn();
+    }
+    match /counters/{id} {
+      allow read, write: if signedIn();
+    }
+
+    // Payment entries. A branch sees and changes only its own. A received
+    // entry locks 24 hours after it was created; a still-pending one can
+    // always be marked received / cancelled. Nothing is ever hard-deleted.
+    match /entries/{id} {
+      allow read: if isAdmin() || (signedIn() && resource.data.branch == me());
+
+      allow create: if isAdmin() || (signedIn()
+        && request.resource.data.branch == me()
+        && request.resource.data.type == 'payment'
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time);
+
+      allow update: if isAdmin() || (signedIn()
+        && resource.data.branch == me()
+        && request.resource.data.branch == resource.data.branch
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.qrId == resource.data.qrId
+        && request.resource.data.month == resource.data.month
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdAtMs == resource.data.createdAtMs
+        && request.resource.data.status in ['pending', 'received', 'cancelled', 'deleted']
+        && (resource.data.status == 'pending'
+            || request.time < resource.data.createdAt + duration.value(24, 'h')));
+
+      allow delete: if false;
+    }
+
+    // Reference photos, one per entry (same id as the entry).
+    match /photos/{id} {
+      allow read: if isAdmin() || (signedIn() && (resource == null || resource.data.branch == me()));
+      allow create, update: if isAdmin() || (signedIn()
+        && request.resource.data.branch == me()
+        && get(/databases/$(database)/documents/entries/$(id)).data.branch == me());
+      allow delete: if isAdmin();
+    }
+  }
+}
