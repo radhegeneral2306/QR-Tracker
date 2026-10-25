@@ -190,8 +190,10 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
 @keyframes ring     { from { opacity: .5; transform: scale(.7); } to { opacity: 0; transform: scale(1.6); } }
 @keyframes spin     { to { transform: rotate(360deg); } }
 
-.enter { animation: fadeUp var(--t-slow) var(--ease-out) both; }
-.stagger > * { animation: fadeUp var(--t-slow) var(--ease-out) both; animation-delay: calc(min(var(--i, 0), 10) * 35ms); }
+/* backwards fill (not both): once done, no transform stays on the element,
+   so it never becomes the containing block for position:fixed overlays. */
+.enter { animation: fadeUp var(--t-slow) var(--ease-out) backwards; }
+.stagger > * { animation: fadeUp var(--t-slow) var(--ease-out) backwards; animation-delay: calc(min(var(--i, 0), 10) * 35ms); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1004,6 +1006,9 @@ const EXIT_MS = REDUCED_MOTION ? 0 : 230;
 function Icon({ n, fill, className = "", ...rest }) {
   return <i className={`${fill ? "ph-fill" : "ph"} ph-${n} ${className}`} aria-hidden="true" {...rest} />;
 }
+// Overlays render straight into <body> so no animated/transformed page
+// wrapper can trap their position:fixed layout.
+function Overlay({ children }) { return ReactDOM.createPortal(children, document.body); }
 function Spinner() { return <Icon n="circle-notch" className="spin" />; }
 
 function timeAgo(ms, now) {
@@ -1098,13 +1103,15 @@ function Sheet({ title, closing, onClose, children }) {
     return () => { document.body.style.overflow = prev; window.removeEventListener("keydown", onKey); };
   }, [onClose]);
   return (
-    <div className={"sheet-bg" + (closing ? " closing" : "")} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
-        <div className="grabber" />
-        <div className="sheet-head"><h2>{title}</h2><button className="icon-btn" onClick={onClose} aria-label="Band karo"><Icon n="x" /></button></div>
-        {children}
+    <Overlay>
+      <div className={"sheet-bg" + (closing ? " closing" : "")} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+        <div className="sheet" role="dialog" aria-modal="true" aria-label={title}>
+          <div className="grabber" />
+          <div className="sheet-head"><h2>{title}</h2><button className="icon-btn" onClick={onClose} aria-label="Band karo"><Icon n="x" /></button></div>
+          {children}
+        </div>
       </div>
-    </div>
+    </Overlay>
   );
 }
 
@@ -1406,10 +1413,10 @@ function ShowQr({ entry, qrs, totals, now, busy, onReceived, onCancel, onBack })
         </div>}
       </div>
       <div className="hint center">"Payment received" tabhi dabayein jab paisa account mein aa jaaye.</div>
-      <div className="action-bar"><div className="btn-row">
+      <Overlay><div className="action-bar"><div className="btn-row">
         <button className="btn ghost big" style={{ flex: "0 0 36%" }} disabled={busy} onClick={onCancel}>Cancel</button>
         <button className="btn ok big" disabled={busy} onClick={onReceived}><Icon n="check-circle" />Payment received</button>
-      </div></div>
+      </div></div></Overlay>
     </div>
   );
 }
@@ -1449,11 +1456,11 @@ function ReceiveForm({ entry, photoRequired, onBack, onDone }) {
         </label>
         <PhotoPicker value={photo} onChange={setPhoto} required={photoRequired} />
       </div>
-      <div className="action-bar"><div>
+      <Overlay><div className="action-bar"><div>
         <button className="btn ok block big" disabled={busy || !(amount > 0) || (photoRequired && !photo)} onClick={save}>
           {busy ? <><Spinner />Save ho raha hai</> : <><Icon n="check-circle" />Save</>}
         </button>
-      </div></div>
+      </div></div></Overlay>
     </div>
   );
 }
@@ -1463,12 +1470,12 @@ function SuccessScreen({ amount, remark, qrName, onNext }) {
   const next = useCallback(() => { setClosing(true); setTimeout(onNext, EXIT_MS); }, [onNext]);
   useEffect(() => { const t = setTimeout(next, 2600); return () => clearTimeout(t); }, [next]);
   return (
-    <div className={"success" + (closing ? " closing" : "")} role="status">
+    <Overlay><div className={"success" + (closing ? " closing" : "")} role="status">
       <div className="burst"><Icon n="check-circle" fill /></div>
       <div className="s-amt num">{rupees(amount)}</div>
       <div className="s-sub">Add ho gaya. {remark} <span className="muted">({qrName})</span></div>
       <button className="btn big" onClick={next}>Agla payment<Icon n="arrow-right" /></button>
-    </div>
+    </div></Overlay>
   );
 }
 
