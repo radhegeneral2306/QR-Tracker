@@ -202,6 +202,10 @@ label.f > span { display: block; font-size: 13px; font-weight: 600; color: var(-
 /* lists */
 .list-item { display: flex; gap: 10px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--line); }
 .list-item:last-child { border-bottom: 0; }
+.list-item.selectable { cursor: pointer; margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+.list-item.sel { background: var(--brand-soft); }
+.check { width: 20px; height: 20px; margin: 2px 0 0; flex: none; accent-color: var(--brand); pointer-events: none; }
+.sel-bar { position: sticky; top: calc(58px + env(safe-area-inset-top)); z-index: 10; background: var(--surface); border: 1px solid var(--line-2); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; box-shadow: var(--shadow); }
 .amt { font-weight: 700; white-space: nowrap; }
 .amt.neg { color: var(--bad); }
 .strike { text-decoration: line-through; color: var(--muted-2); }
@@ -597,6 +601,63 @@ async function recalcTotals(month, qrs) {
   await batch.commit();
 }
 
+// Owner bulk delete. Received entries become "deleted" and leave the QR
+// total; pending ones are cancelled and their hold released. One
+// transaction per QR-month so each total is updated exactly once.
+async function bulkDeleteEntries(entries, role) {
+  const groups = {};
+  entries.filter((e) => e.status === "received" || e.status === "pending").forEach((e) => {
+    const k = `${e.month}_${e.qrId}`;
+    (groups[k] = groups[k] || []).push(e);
+  });
+  let done = 0;
+  for (const list of Object.values(groups)) {
+    for (let i = 0; i < list.length; i += 200) {
+      const chunk = list.slice(i, i + 200);
+      const { month, qrId } = chunk[0];
+      await db.runTransaction(async (tx) => {
+        const tRef = totalRef(month, qrId);
+        const tSnap = await tx.get(tRef);
+        const snaps = [];
+        for (const e of chunk) snaps.push(await tx.get(db.doc(`entries/${e.id}`)));
+        const t = tSnap.data() || {};
+        const now = Date.now();
+        const holds = pruneHolds(t.holds, now);
+        let received = Number(t.received) || 0;
+        snaps.forEach((snap) => {
+          if (!snap.exists) return;
+          const e = snap.data();
+          if (e.status === "received") {
+            received -= Number(e.amount) || 0;
+            tx.update(snap.ref, { status: "deleted", deletedAmount: e.amount, editedAtMs: now, editedBy: role.name });
+          } else if (e.status === "pending") {
+            delete holds[snap.id];
+            tx.update(snap.ref, { status: "cancelled", cancelledAtMs: now, editedBy: role.name });
+          }
+        });
+        tx.set(tRef, { month, qrId, received: Math.round(received * 100) / 100, holds });
+      });
+      done += chunk.length;
+    }
+  }
+  return done;
+}
+
+// Owner only: wipe already deleted/cancelled entries (and their photos)
+// for good. They no longer count in any total, so totals are untouched.
+async function purgeEntries(entries) {
+  const gone = entries.filter((e) => e.status === "deleted" || e.status === "cancelled");
+  for (let i = 0; i < gone.length; i += 200) {
+    const batch = db.batch();
+    gone.slice(i, i + 200).forEach((e) => {
+      batch.delete(db.doc(`entries/${e.id}`));
+      batch.delete(db.doc(`photos/${e.id}`));
+    });
+    await batch.commit();
+  }
+  return gone.length;
+}
+
 /* =========================================================
    HOOKS
    ========================================================= */
@@ -928,13 +989,16 @@ function canEdit(e, role, now) {
   return e.branch === role.email && now - (e.createdAtMs || 0) < EDIT_WINDOW_MS;
 }
 
-function EntryList({ entries, role, now, onEdit, onPhoto, showBranch }) {
+function EntryList({ entries, role, now, onEdit, onPhoto, showBranch, selected, onToggle }) {
   if (!entries.length) return <div className="muted center small" style={{ padding: 18 }}>Koi entry nahi.</div>;
+  const selecting = !!selected;
   return entries.map((e) => {
     const editable = e.status === "received" && canEdit(e, role, now);
     const locked = e.status === "received" && !editable;
     return (
-      <div className="list-item" key={e.id}>
+      <div className={"list-item" + (selecting ? " selectable" : "") + (selecting && selected.has(e.id) ? " sel" : "")} key={e.id}
+        onClick={selecting ? () => onToggle(e.id) : undefined}>
+        {selecting && <input type="checkbox" className="check" checked={selected.has(e.id)} readOnly aria-label={"Select " + e.remark} />}
         <div className="grow">
           <div className="row wrap" style={{ gap: 6 }}>
             <span className="remark-chip">{e.remark}</span>
@@ -949,10 +1013,10 @@ function EntryList({ entries, role, now, onEdit, onPhoto, showBranch }) {
         </div>
         <div className="right">
           <div className={"amt " + (e.status === "received" ? (e.amount < 0 ? "neg" : "") : "strike")}>{rupees(e.status === "deleted" ? e.deletedAmount : e.amount)}</div>
-          <div className="row" style={{ gap: 6, justifyContent: "flex-end", marginTop: 4 }}>
+          {!selecting && <div className="row" style={{ gap: 6, justifyContent: "flex-end", marginTop: 4 }}>
             {e.hasPhoto && <button className="btn sm ghost" onClick={() => onPhoto(e)} aria-label="Photo">🖼️</button>}
             {editable && <button className="btn sm ghost" onClick={() => onEdit(e)}>Edit</button>}
-          </div>
+          </div>}
         </div>
       </div>
     );
@@ -1035,6 +1099,7 @@ function Dashboard({ role, qrs, now }) {
   const [photoOf, setPhotoOf] = useState(null);
   const [adjOpen, setAdjOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState(null);   // Set of entry ids while in select mode
 
   const totalsS = useSnapshot(() => db.collection("totals").where("month", "==", month), [month]);
   const entriesS = useSnapshot(() => db.collection("entries").where("month", "==", month), [month]);
@@ -1053,6 +1118,28 @@ function Dashboard({ role, qrs, now }) {
   received.forEach((e) => { branchSums[e.branchName] = (branchSums[e.branchName] || 0) + e.amount; });
 
   const filtered = all.filter((e) => (!fBranch || e.branch === fBranch) && (!fQr || e.qrId === fQr) && (!fStatus || e.status === fStatus));
+  useEffect(() => { setSelected((s) => (s ? new Set() : s)); }, [month, fBranch, fQr, fStatus]);
+  const picked = selected ? filtered.filter((e) => selected.has(e.id)) : [];
+  const pickedLive = picked.filter((e) => e.status === "received" || e.status === "pending");
+  const pickedGone = picked.filter((e) => e.status === "deleted" || e.status === "cancelled");
+  const pickedSum = picked.filter((e) => e.status === "received").reduce((a, e) => a + e.amount, 0);
+  function toggle(id) {
+    setSelected((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+  async function deletePicked() {
+    if (!confirm(`${pickedLive.length} entries delete karein?` + (pickedSum ? ` ${rupees(pickedSum)} QR totals se hat jaayega.` : ""))) return;
+    setBusy(true);
+    try { const n = await bulkDeleteEntries(pickedLive, role); toast(`${n} entries delete ho gayi.`); setSelected(new Set()); }
+    catch (e) { toast(errMsg(e), true); }
+    finally { setBusy(false); }
+  }
+  async function purgePicked() {
+    if (!confirm(`${pickedGone.length} deleted/cancelled entries HAMESHA ke liye hata dein? Yeh wapas nahi aayengi.`)) return;
+    setBusy(true);
+    try { const n = await purgeEntries(pickedGone); toast(`${n} entries hamesha ke liye hata di gayi.`); setSelected(new Set()); }
+    catch (e) { toast(errMsg(e), true); }
+    finally { setBusy(false); }
+  }
   const branchOpts = [...BRANCHES.map((b) => ({ v: b.email, l: b.name })), { v: ADMIN_EMAIL, l: "Owner" }];
 
   async function recalc() {
@@ -1105,7 +1192,10 @@ function Dashboard({ role, qrs, now }) {
         ))}
       </div>
 
-      <div className="section-title">Entries</div>
+      <div className="row" style={{ margin: "18px 2px 8px" }}>
+        <div className="section-title grow" style={{ margin: 0 }}>Entries ({filtered.length})</div>
+        <button className="btn sm ghost" onClick={() => setSelected(selected ? null : new Set())}>{selected ? "Done" : "☑ Select"}</button>
+      </div>
       <div className="chip-row">
         <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
           <option value="received">Received</option><option value="pending">Pending</option>
@@ -1118,9 +1208,21 @@ function Dashboard({ role, qrs, now }) {
           <option value="">Sab QR</option>{(qrs || []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
         </select>
       </div>
+      {selected && <div className="sel-bar">
+        <div className="row" style={{ marginBottom: 8 }}>
+          <div className="grow small"><b>{picked.length}</b> selected{pickedSum ? ` · ${rupees(pickedSum)}` : ""}</div>
+          <button className="btn sm ghost" onClick={() => setSelected(picked.length === filtered.length ? new Set() : new Set(filtered.map((e) => e.id)))}>
+            {picked.length === filtered.length && filtered.length ? "Sab hatao" : "Sab select"}
+          </button>
+        </div>
+        <div className="btn-row">
+          <button className="btn sm bad" disabled={busy || !pickedLive.length} onClick={deletePicked}>🗑 Delete ({pickedLive.length})</button>
+          <button className="btn sm ghost" disabled={busy || !pickedGone.length} onClick={purgePicked}>Permanently remove ({pickedGone.length})</button>
+        </div>
+      </div>}
       <div className="card" style={{ padding: "4px 16px" }}>
         {entriesS.loading ? <div className="spinner" /> : entriesS.error ? <div className="alert red">{errMsg(entriesS.error)}</div>
-          : <EntryList entries={filtered} role={role} now={now} onEdit={setEditing} onPhoto={setPhotoOf} showBranch />}
+          : <EntryList entries={filtered} role={role} now={now} onEdit={setEditing} onPhoto={setPhotoOf} showBranch selected={selected} onToggle={toggle} />}
       </div>
 
       <div className="btn-row" style={{ marginTop: 6 }}>

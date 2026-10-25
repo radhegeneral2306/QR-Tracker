@@ -34,7 +34,7 @@ service cloud.firestore {
 
     // Payment entries. A branch sees and changes only its own. A received
     // entry locks 24 hours after it was created; a still-pending one can
-    // always be marked received / cancelled. Nothing is ever hard-deleted.
+    // always be marked received / cancelled.
     match /entries/{id} {
       allow read: if isAdmin() || (signedIn() && resource.data.branch == me());
 
@@ -56,7 +56,8 @@ service cloud.firestore {
         && (resource.data.status == 'pending'
             || request.time < resource.data.createdAt + duration.value(24, 'h')));
 
-      allow delete: if false;
+      // Only the owner can wipe entries for good (already deleted/cancelled ones).
+      allow delete: if isAdmin();
     }
 
     // Reference photos, one per entry (same id as the entry).
