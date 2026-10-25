@@ -354,7 +354,7 @@ function usageFor(total, now = Date.now()) {
 // Enabled, not expired, highest limit first (older QR first on a tie).
 function activeQrs(qrs, today = dayKey()) {
   return (qrs || [])
-    .filter((q) => q.enabled && !isExpired(q, today) && q.upiId && Number(q.limit) > 0)
+    .filter((q) => q.enabled && !q.archived && !isExpired(q, today) && q.upiId && Number(q.limit) > 0)
     .sort((a, b) => b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0));
 }
 // Margin rule: a QR that is still under its limit can take one more payment
@@ -1043,7 +1043,7 @@ function Dashboard({ role, qrs, now }) {
   const today = dayKey(now);
   const isCurrent = month === monthKey(now);
 
-  const qrList = (qrs || []).slice().sort((a, b) => {
+  const qrList = (qrs || []).filter((q) => !q.archived || (tmap[q.id] && Number(tmap[q.id].received))).sort((a, b) => {
     const aa = a.enabled && !isExpired(a, today), bb = b.enabled && !isExpired(b, today);
     return (bb - aa) || b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0);
   });
@@ -1085,7 +1085,7 @@ function Dashboard({ role, qrs, now }) {
                 <div style={{ fontWeight: 600 }} className="ellipsis">{q.name}</div>
                 <div className="tiny muted mono ellipsis">{q.upiId}</div>
               </div>
-              {off ? <span className="badge">Disabled</span> : exp ? <span className="badge">Expired</span>
+              {q.archived ? <span className="badge">Archived</span> : off ? <span className="badge">Disabled</span> : exp ? <span className="badge">Expired</span>
                 : lvl === "red" ? <span className="badge bad">Limit full</span> : lvl === "yellow" ? <span className="badge warn">90%+</span> : <span className="badge ok">Active</span>}
             </div>
             <UsageBar used={u.used} limit={q.limit} />
@@ -1171,39 +1171,87 @@ function AdjustmentModal({ month, qrs, onClose }) {
 /* =========================================================
    ADMIN: QR SETUP
    ========================================================= */
+// Archive = take a QR out of use but keep its history (restorable).
+// Permanent delete only for an archived QR that has never had an entry,
+// i.e. one added by mistake or for testing.
+async function deleteQrForever(q) {
+  const used = await db.collection("entries").where("qrId", "==", q.id).limit(1).get();
+  if (!used.empty) throw new Error("Is QR pe entries hain, isliye delete nahi ho sakta. Archive mein rehne do.");
+  const totals = await db.collection("totals").where("qrId", "==", q.id).get();
+  const batch = db.batch();
+  totals.forEach((d) => batch.delete(d.ref));
+  batch.delete(db.doc(`qrImages/${q.id}`));
+  batch.delete(db.doc(`qrs/${q.id}`));
+  await batch.commit();
+}
+
 function QrsTab({ qrs, settings, now }) {
   const toast = useToast();
   const [editing, setEditing] = useState(null);   // qr object, or {} for new
+  const [view, setView] = useState("main");        // main | archived
+  const [busyId, setBusyId] = useState(null);
   const today = dayKey(now);
-  const list = (qrs || []).slice().sort((a, b) => b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0));
-  async function toggleEnabled(q, v) {
-    try { await db.doc(`qrs/${q.id}`).update({ enabled: v }); } catch (e) { toast(errMsg(e), true); }
+  const sorted = (qrs || []).slice().sort((a, b) => b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0));
+  const archived = sorted.filter((q) => q.archived);
+  const list = view === "archived" ? archived : sorted.filter((q) => !q.archived);
+
+  async function run(q, fn, okMsg) {
+    setBusyId(q.id);
+    try { await fn(); if (okMsg) toast(okMsg); } catch (e) { toast(errMsg(e), true); } finally { setBusyId(null); }
   }
+  const toggleEnabled = (q, v) => run(q, () => db.doc(`qrs/${q.id}`).update({ enabled: v }));
+  const archive = (q) => {
+    if (!confirm(`"${q.name}" ko archive karein? Yeh QR band ho jaayega, history bachi rahegi.`)) return;
+    run(q, () => db.doc(`qrs/${q.id}`).update({ archived: true, enabled: false, archivedAtMs: Date.now() }), "QR archive ho gaya.");
+  };
+  const restore = (q) => run(q, () => db.doc(`qrs/${q.id}`).update({ archived: false }), "QR wapas aa gaya (abhi disabled hai, on kar dein).");
+  const remove = (q) => {
+    if (!confirm(`"${q.name}" ko hamesha ke liye delete karein? Yeh wapas nahi aayega.`)) return;
+    run(q, () => deleteQrForever(q), "QR delete ho gaya.");
+  };
+
   return (
     <div className="page">
-      <button className="btn block big" onClick={() => setEditing({})}>+ Naya QR add karo</button>
-      <div className="hint" style={{ margin: "8px 2px 4px" }}>Order: sabse badi limit wala QR pehle use hota hai. Disabled/expired QR kabhi delete nahi hote, history mein rehte hain.</div>
+      <div className="btn-row" style={{ marginBottom: 12 }}>
+        <button className={"btn sm " + (view === "main" ? "" : "ghost")} onClick={() => setView("main")}>QRs ({sorted.length - archived.length})</button>
+        <button className={"btn sm " + (view === "archived" ? "" : "ghost")} onClick={() => setView("archived")}>🗄️ Archived ({archived.length})</button>
+      </div>
+      {view === "main" ? <>
+        <button className="btn block big" onClick={() => setEditing({})}>+ Naya QR add karo</button>
+        <div className="hint" style={{ margin: "8px 2px 4px" }}>Order: sabse badi limit wala QR pehle use hota hai. Thodi der ke liye band karna ho toh toggle off karo; hamesha ke liye hatana ho toh Archive.</div>
+      </> : <div className="hint" style={{ margin: "0 2px 4px" }}>Archived QR kabhi use nahi hote, history bachi rehti hai. Delete sirf us QR pe hota hai jispe kabhi koi entry nahi hui (galti/testing wale).</div>}
+      {view === "archived" && !list.length && <div className="card muted small center">Koi archived QR nahi.</div>}
       {list.map((q) => {
         const exp = isExpired(q, today);
+        const busy = busyId === q.id;
         return (
-          <div className="card" key={q.id} style={{ padding: 14, marginTop: 10 }}>
+          <div className="card" key={q.id} style={{ padding: 14, marginTop: 10, opacity: q.archived ? 0.8 : 1 }}>
             <div className="row">
               <div className="grow">
                 <div style={{ fontWeight: 600 }} className="ellipsis">{q.name}</div>
                 <div className="tiny muted mono ellipsis">{q.upiId}</div>
                 <div className="row wrap" style={{ gap: 6, marginTop: 6 }}>
                   <span className="badge info">Limit {rupees(q.limit)}</span>
-                  {exp ? <span className="badge bad">Expired {fmtDate(q.expiryDate)}</span>
+                  {q.archived ? <span className="badge">Archived {q.archivedAtMs ? fmtDateTime(q.archivedAtMs).split(",")[0] : ""}</span>
+                    : exp ? <span className="badge bad">Expired {fmtDate(q.expiryDate)}</span>
                     : q.expiryEnabled && q.expiryDate ? <span className="badge warn">Expiry {fmtDate(q.expiryDate)}</span> : <span className="badge">Permanent</span>}
-                  {(q.photoRequired || settings.photoRequiredAll) && <span className="badge">📷 Photo zaroori</span>}
+                  {!q.archived && (q.photoRequired || settings.photoRequiredAll) && <span className="badge">📷 Photo zaroori</span>}
                 </div>
               </div>
-              <label className="switch" title="Enable / disable">
-                <input type="checkbox" checked={!!q.enabled} onChange={(e) => toggleEnabled(q, e.target.checked)} />
+              {!q.archived && <label className="switch" title="Enable / disable">
+                <input type="checkbox" checked={!!q.enabled} disabled={busy} onChange={(e) => toggleEnabled(q, e.target.checked)} />
                 <span className="sl" />
-              </label>
+              </label>}
             </div>
-            <button className="btn sm ghost block" style={{ marginTop: 10 }} onClick={() => setEditing(q)}>Edit</button>
+            <div className="btn-row" style={{ marginTop: 10 }}>
+              {q.archived ? <>
+                <button className="btn sm ghost" disabled={busy} onClick={() => restore(q)}>↩ Restore</button>
+                <button className="btn sm bad" disabled={busy} onClick={() => remove(q)}>Delete</button>
+              </> : <>
+                <button className="btn sm ghost" disabled={busy} onClick={() => setEditing(q)}>Edit</button>
+                <button className="btn sm ghost" disabled={busy} onClick={() => archive(q)}>🗄️ Archive</button>
+              </>}
+            </div>
           </div>
         );
       })}

@@ -113,7 +113,8 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 - **Pending payment 30 minute tak QR limit mein reserve rehti hai**, taaki do branch ek saath ek hi QR ko overfill na kar dein. 30 minute ke baad reserve hat jaata hai, lekin entry Open payments list mein bani rehti hai.
 - **Mahine mein ek baar bank statement se milaan karo.** App ko asli UPI payment ka pata nahi chalta, woh sirf staff ke button dabane pe chalti hai. Koi farak mile toh Dashboard → **± Adjustment** se theek karo.
 - **↻ Recalculate:** agar kabhi totals galat lagein, toh yeh button saari entries se totals dobara bana deta hai.
-- QR kabhi delete nahi hota. Band karna ho toh toggle off karo, ya expiry date daal do.
+- **QR band karna:** thodi der ke liye band karna ho toh toggle off karo. Hamesha ke liye hatana ho toh **🗄️ Archive** karo. Archive karne se history bachi rehti hai aur QR wapas Restore bhi ho sakta hai.
+- **QR delete:** sirf Archived tab mein milta hai, aur sirf us QR pe chalta hai jispe kabhi koi entry nahi hui (galti se ya testing mein add kiye QR). Jis QR pe payment ho chuki hai, woh delete nahi hota, taaki purana hisaab na toote.
 
 ## Known limits (honest list)
 
