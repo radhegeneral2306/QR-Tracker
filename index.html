@@ -788,20 +788,45 @@ function drawScaled(img, maxDim) {
   ctx.drawImage(img, 0, 0, c.width, c.height);
   return { c, ctx };
 }
-// Photos are stored inside Firestore (works on the free plan), so they must
-// stay well under Firestore's 1 MB document limit. Target ~200 KB.
-async function compressImage(file, { maxDim = 1100, maxChars = 270000, quality = 0.7 } = {}) {
+// Photos are stored inside Firestore (free plan), so they are squeezed hard:
+// WebP where the browser can encode it (about a third smaller than JPEG at the
+// same look; iPhone Safari falls back to JPEG), shrunk and lowered in quality
+// step by step until under maxChars. Reference photos aim for ~60 KB, which
+// keeps payment screenshots readable. The QR backup photo gets a gentler
+// profile so it still scans.
+let _webpOk;
+function webpOk() {
+  if (_webpOk === undefined) {
+    try { _webpOk = document.createElement("canvas").toDataURL("image/webp").startsWith("data:image/webp"); } catch (e) { _webpOk = false; }
+  }
+  return _webpOk;
+}
+async function compressImage(file, { maxDim = 960, maxChars = 85000, quality = 0.6, minQuality = 0.4, minDim = 560, hardMax = 300000 } = {}) {
   const { img, revoke } = await loadImage(file);
   try {
-    let dim = maxDim, q = quality;
-    for (let i = 0; i < 10; i++) {
+    const type = webpOk() ? "image/webp" : "image/jpeg";
+    let dim = maxDim, q = quality, last = "";
+    for (let i = 0; i < 16; i++) {
       const { c } = drawScaled(img, dim);
-      const url = c.toDataURL("image/jpeg", q);
-      if (url.length <= maxChars) return url;
-      if (q > 0.45) q -= 0.1; else dim = Math.round(dim * 0.8);
+      last = c.toDataURL(type, q);
+      if (last.length <= maxChars) return last;
+      if (q > minQuality + 0.001) q = Math.max(minQuality, q - 0.07);
+      else if (dim > minDim) dim = Math.max(minDim, Math.round(dim * 0.85));
+      else break;
     }
+    // Could not reach the target (a very busy photo): keep the smallest result if it is still far below Firestore's 1 MB limit.
+    if (last.length <= hardMax) return last;
     throw new Error("Photo bahut badi hai, dusri photo try karein.");
   } finally { revoke(); }
+}
+// The QR backup photo is stored exactly as uploaded so it always scans. Only a photo too big for
+// Firestore (1 MB per document) is shrunk, and then at high quality.
+async function readQrPhoto(file) {
+  if (/^image\/(jpeg|png|webp|gif)$/.test(file.type) && file.size <= 560 * 1024) {
+    const url = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file); });
+    if (url.length <= 780000) return url;
+  }
+  return compressImage(file, { maxDim: 1600, maxChars: 700000, quality: 0.9, minQuality: 0.75, minDim: 1000, hardMax: 800000 });
 }
 async function decodeQrFromFile(file) {
   const { img, revoke } = await loadImage(file);
@@ -2094,7 +2119,7 @@ function QrForm({ qr, onClose }) {
       } else {
         setScan({ ok: false, msg: "QR padha nahi gaya. Saaf ya crop ki hui photo try karein, ya UPI ID khud likhein." });
       }
-      setImage(await compressImage(f, { maxDim: 900, maxChars: 300000, quality: 0.85 }));
+      setImage(await readQrPhoto(f));
     } catch (err) { setScan({ ok: false, msg: errMsg(err) }); }
   }
 

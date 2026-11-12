@@ -150,4 +150,4 @@ Dashboard aur branch ke Entries tab mein search box hai. Remark (jaise `Raipur 0
 ## Known limits (honest list)
 
 - Koi branch ka banda technical tareeke se (browser console se) QR totals ke numbers chhed sakta hai. Entries aur 24 ghante ka lock server pe protected hain, lekin running totals nahi. Agar aisa shak ho, toh **Recalculate** dabane se totals entries se sahi ho jaate hain.
-- Photos ~200 KB tak compress hoti hain. Free plan mein 1 GB tak jagah milti hai, yaani lagbhag 4,000-5,000 photos. Usse zyada ho jaayein toh purani photos hatani padengi ya Blaze plan lena padega.
+- Reference photos bahut chhoti (aam taur pe 10-60 KB) compress hokar save hoti hain, taaki Firebase ki free jagah (1 GB) zyada chale. Payment screenshot ka text phir bhi padhne layak rehta hai. Original QR ki photo compress nahi hoti, jaisi upload karo waisi save hoti hai (sirf bahut badi photo Firebase ki 1 MB limit ki wajah se chhoti ki jaati hai).
