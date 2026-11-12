@@ -119,6 +119,26 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 - **QR band karna:** thodi der ke liye band karna ho toh toggle off karo. Hamesha ke liye hatana ho toh **🗄️ Archive** karo. Archive karne se history bachi rehti hai aur QR wapas Restore bhi ho sakta hai.
 - **QR delete:** sirf Archived tab mein milta hai, aur sirf us QR pe chalta hai jispe kabhi koi entry nahi hui (galti se ya testing mein add kiye QR). Jis QR pe payment ho chuki hai, woh delete nahi hota, taaki purana hisaab na toote.
 
+## Billed QR (bill chahiye ya nahi)
+
+- **QR setup:** QRs tab mein QR add ya edit karte waqt **Billed QR** toggle hai. On = billed QR, Off = regular QR. Purane saare QR regular maane jaate hain.
+- **Staff ke liye:** "QR banao" dabate hi popup aata hai: **Bill chahiye? Haan / Nahi**.
+  - **Haan:** sirf billed QR milega. Agar billed QR mein is amount ki jagah nahi (ya koi billed QR on nahi), toh error aata hai. Regular QR nahi milega.
+  - **Nahi:** pehle regular QR (badi limit pehle). Billed QR tabhi milega jab koi bhi regular QR is amount ko le nahi sakta. Tab staff ko yellow alert dikhta hai: "Regular QR full hain, isliye billed QR diya gaya".
+- Har entry pe **Billed** badge dikhta hai. Dashboard mein "Billed QR / Regular QR" ka filter hai, aur reports mein billed aur regular ka alag total aata hai.
+
+## Reports tab (sirf Owner)
+
+- **Month summary:** mahine ka final total, billed vs regular total, har QR ka final total aur branch-wise total ek screen pe. Agar payments pending hain toh mahina badalne se pehle yellow reminder dikhta hai. Agar QR total aur entries mein farak ho, toh red alert aata hai (Dashboard pe Recalculate dabao).
+- **Bank milaan:** har QR ke saamne bank statement ka total daalo. App dikhati hai ki farak kitna hai. Farak ho toh **Adjust** dabane se ek Adjustment entry ban jaati hai aur total theek ho jaata hai.
+- **Report download:** Daily (ek din), Monthly (upar chuna hua mahina) ya Custom (from-to). **Excel** aur **PDF** dono milte hain, jisme branch-wise aur QR-wise total hota hai. Excel mein QR x Branch table aur poori entries ki list bhi hoti hai. PDF mein amount "Rs." se likha aata hai.
+  - iPhone pe report download ke bajaye Share sheet khulti hai, wahan se "Save to Files" chuno.
+  - Report banate waqt internet chahiye (Excel/PDF library pehli baar download hoti hai).
+
+## Search
+
+Dashboard aur branch ke Entries tab mein search box hai. Remark (jaise `Raipur 0004` ya `0004`), amount (jaise `15000`), QR ka naam ya branch se dhoondh sakte ho. Search sirf us mahine mein hota hai jo screen pe chuna hua hai.
+
 ## Known limits (honest list)
 
 - Koi branch ka banda technical tareeke se (browser console se) QR totals ke numbers chhed sakta hai. Entries aur 24 ghante ka lock server pe protected hain, lekin running totals nahi. Agar aisa shak ho, toh **Recalculate** dabane se totals entries se sahi ho jaate hain.
