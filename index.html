@@ -713,21 +713,49 @@ function levelFor(used, limit) {
 function pct(used, limit) { return limit ? Math.round((used / limit) * 100) : 0; }
 
 /* ---- UPI ---- */
+// Merchant QRs (HDFC SmartHub Vyapar and other Bharat QR / EMVCo codes) do not
+// hold a upi:// link. They hold nested tag-length-value text starting "000201";
+// the UPI ID is in one of tags 26-51 (sub-tag 01), the name in tag 59, the
+// merchant category code in tag 52.
+function parseBharatQr(text) {
+  const tlv = (str) => {
+    const out = {}; let i = 0;
+    while (i < str.length) {
+      if (i + 4 > str.length) return null;
+      const len = parseInt(str.slice(i + 2, i + 4), 10);
+      if (!(len >= 0) || i + 4 + len > str.length) return null;
+      out[str.slice(i, i + 2)] = str.slice(i + 4, i + 4 + len);
+      i += 4 + len;
+    }
+    return out;
+  };
+  const t = tlv(text);
+  if (!t || !t["59"] && !t["52"]) return null;
+  for (let tag = 26; tag <= 51; tag++) {
+    const sub = t[String(tag)] ? tlv(t[String(tag)]) : null;
+    const pa = sub && (sub["01"] || "").trim();
+    if (pa && /^[\w.\-]+@[\w.\-]+$/.test(pa)) return { pa, pn: (t["59"] || "").trim(), mc: (t["52"] || "").trim(), bharat: true };
+  }
+  return null;
+}
 function parseUpi(text) {
   if (!text) return null;
   const t = text.trim();
+  if (/^0002\d\d/.test(t)) return parseBharatQr(t);
   if (!/^upi:\/\/pay/i.test(t)) return null;
   const qi = t.indexOf("?");
   if (qi < 0) return null;
   const p = new URLSearchParams(t.slice(qi + 1));
   const pa = (p.get("pa") || "").trim();
   if (!pa) return null;
-  return { pa, pn: (p.get("pn") || "").trim() };
+  return { pa, pn: (p.get("pn") || "").trim(), mc: (p.get("mc") || "").trim() };
 }
-function upiLink({ upiId, payee, amount, remark }) {
+function upiLink({ upiId, payee, amount, remark, mc, tr }) {
   // UPI ids are plain [a-z0-9.-_@], left as-is: some apps choke on %40.
   const parts = [`pa=${upiId}`];
   if (payee) parts.push(`pn=${encodeURIComponent(payee)}`);
+  // Merchant accounts: the UPI link spec asks for the merchant code and a transaction reference.
+  if (mc && mc !== "0000") { parts.push(`mc=${mc}`); if (tr) parts.push(`tr=${tr}`); }
   parts.push(`am=${Number(amount).toFixed(2)}`, "cu=INR");
   if (remark) parts.push(`tn=${encodeURIComponent(remark)}`);
   return "upi://pay?" + parts.join("&");
@@ -846,7 +874,7 @@ async function reservePayment({ role, qrs, margin, amount, billRequired }) {
       type: "payment", status: "pending",
       qrId: qr.id, qrName: qr.name, upiId: qr.upiId, payeeName: qr.payeeName || "",
       amount, reservedAmount: amount, remark, seq: n, month,
-      billRequired: !!billRequired, qrBilled: !!qr.billed,
+      billRequired: !!billRequired, qrBilled: !!qr.billed, mc: qr.mc || "",
       branch: role.email, branchId: role.id, branchName: role.name,
       createdAt: FV.serverTimestamp(), createdAtMs: now, hasPhoto: false,
     };
@@ -1442,7 +1470,7 @@ function ReceiveTab({ role, settings, qrs, totals, now, onFlowChange }) {
 function ShowQr({ entry, qrs, totals, now, busy, onReceived, onCancel, onBack }) {
   const [mode, setMode] = useState("upi");
   const [orig, setOrig] = useState({ loading: false });
-  const link = useMemo(() => upiLink({ upiId: entry.upiId, payee: entry.payeeName || entry.qrName, amount: entry.amount, remark: entry.remark }), [entry]);
+  const link = useMemo(() => upiLink({ upiId: entry.upiId, payee: entry.payeeName || entry.qrName, amount: entry.amount, remark: entry.remark, mc: entry.mc, tr: entry.id }), [entry]);
   const svg = useMemo(() => qrSvg(link), [link]);
   const qr = (qrs || []).find((q) => q.id === entry.qrId);
   const u = usageFor(byQr(totals)[entry.qrId], now);
@@ -2011,6 +2039,7 @@ function QrForm({ qr, onClose }) {
   const [name, setName] = useState(qr.name || "");
   const [upiId, setUpiId] = useState(qr.upiId || "");
   const [payeeName, setPayeeName] = useState(qr.payeeName || "");
+  const [mc, setMc] = useState(qr.mc || "");   // merchant category code, only for merchant QRs
   const [limitStr, setLimitStr] = useState(qr.limit ? String(qr.limit) : "");
   const [enabled, setEnabled] = useState(isNew ? true : !!qr.enabled);
   const [expiryEnabled, setExpiryEnabled] = useState(!!qr.expiryEnabled);
@@ -2039,8 +2068,9 @@ function QrForm({ qr, onClose }) {
       if (upi) {
         setUpiId(upi.pa);
         if (upi.pn) setPayeeName(upi.pn);
+        setMc(upi.mc && upi.mc !== "0000" ? upi.mc : "");
         if (!name) setName(upi.pn || upi.pa);
-        setScan({ ok: true, msg: `UPI ID mil gayi: ${upi.pa}` });
+        setScan({ ok: true, msg: `${upi.bharat ? "Merchant (Bharat) QR padha. " : ""}UPI ID mil gayi: ${upi.pa}` });
       } else if (text) {
         setScan({ ok: false, msg: "QR mila par yeh UPI QR nahi lagta. UPI ID khud likhein." });
       } else {
@@ -2063,7 +2093,7 @@ function QrForm({ qr, onClose }) {
       const ref = isNew ? db.collection("qrs").doc() : db.doc(`qrs/${qr.id}`);
       if (image) await db.doc(`qrImages/${ref.id}`).set({ data: image });
       const data = {
-        name: name.trim(), upiId: pa, payeeName: payeeName.trim(), limit, enabled,
+        name: name.trim(), upiId: pa, payeeName: payeeName.trim(), mc, limit, enabled,
         expiryEnabled, expiryDate: expiryEnabled ? expiryDate : "", photoRequired, billed,
         hasImage: !!(image || existingImg || qr.hasImage),
       };

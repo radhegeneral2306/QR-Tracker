@@ -119,6 +119,13 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 - **QR band karna:** thodi der ke liye band karna ho toh toggle off karo. Hamesha ke liye hatana ho toh **🗄️ Archive** karo. Archive karne se history bachi rehti hai aur QR wapas Restore bhi ho sakta hai.
 - **QR delete:** sirf Archived tab mein milta hai, aur sirf us QR pe chalta hai jispe kabhi koi entry nahi hui (galti se ya testing mein add kiye QR). Jis QR pe payment ho chuki hai, woh delete nahi hota, taaki purana hisaab na toote.
 
+## Merchant QR (HDFC SmartHub Vyapar jaise)
+
+- Do tarah ke QR hote hain. **Personal QR** (PhonePe, GPay waghera) mein `upi://pay?...` link hota hai. **Merchant QR** (HDFC SmartHub Vyapar, Paytm Soundbox waghera, jis pe merchant ka naam aur TID likha hota hai) mein "Bharat QR" format hota hai, jo `000201...` se shuru hota hai.
+- App ab dono padh leti hai. Merchant QR upload karne pe UPI ID, merchant ka naam aur merchant code apne aap bhar jaate hain, aur upar "Merchant (Bharat) QR padha" likha aata hai.
+- Merchant QR ke liye app ka banaya hua link mein merchant code (`mc`) aur har payment ka alag reference (`tr`) bhi jaata hai, kyunki UPI link ke niyam merchant ke liye yeh maangte hain. Personal QR ka link pehle jaisa hi rehta hai.
+- **Asli ₹1 test zaroori hai:** merchant QR pe amount pehle se bhara aata hai ya nahi, yeh PhonePe, GPay aur Paytm teeno se check karo. Agar koi app mana kare, toh staff "Original QR" tab dikha sakta hai (customer amount khud daalega).
+
 ## Billed QR (bill chahiye ya nahi)
 
 - **QR setup:** QRs tab mein QR add ya edit karte waqt **Billed QR** toggle hai. On = billed QR, Off = regular QR. Purane saare QR regular maane jaate hain.
