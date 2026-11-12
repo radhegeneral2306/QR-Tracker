@@ -104,7 +104,7 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 
 1. Amount daalo, phir **QR banao** dabao.
 2. Customer ko QR dikhao.
-3. Paisa account mein aa jaaye tab **✓ Payment received** dabao (photo zaroori ho toh photo lo), phir Save.
+3. Paisa account mein aa jaaye tab **✓ Payment received** dabao (photo zaroori ho toh photo lo). Chaho toh **Customer name** (optional) bhi likho, taaki baad mein pata chale ki yeh payment kis customer ki thi. Phir Save.
    Payment nahi hui toh **Cancel** dabao.
 4. Koi payment beech mein reh gayi ho toh woh **Open payments** list mein dikhegi. Wahan se kholke Received ya Cancel karo.
 
@@ -145,7 +145,7 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 
 ## Search
 
-Dashboard aur branch ke Entries tab mein search box hai. Remark (jaise `Raipur 0004` ya `0004`), amount (jaise `15000`), QR ka naam ya branch se dhoondh sakte ho. Search sirf us mahine mein hota hai jo screen pe chuna hua hai.
+Dashboard aur branch ke Entries tab mein search box hai. Remark (jaise `Raipur 0004` ya `0004`), amount (jaise `15000`), customer ka naam, QR ka naam ya branch se dhoondh sakte ho. Search sirf us mahine mein hota hai jo screen pe chuna hua hai.
 
 ## Known limits (honest list)
 

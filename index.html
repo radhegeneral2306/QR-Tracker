@@ -693,7 +693,7 @@ function pickCandidates(active, billRequired) {
 function matchEntry(e, query) {
   const s = (query || "").trim().toLowerCase();
   if (!s) return true;
-  const hay = [e.remark, e.qrName, e.branchName, e.note, e.upiId].filter(Boolean).join(" ").toLowerCase();
+  const hay = [e.remark, e.qrName, e.branchName, e.customerName, e.note, e.upiId].filter(Boolean).join(" ").toLowerCase();
   const amt = String(Math.abs(Number(e.amount) || 0));
   return s.split(/\s+/).every((tok) => {
     if (hay.includes(tok)) return true;
@@ -887,7 +887,7 @@ async function savePhoto(entry, dataUrl) {
   await db.doc(`photos/${entry.id}`).set({ branch: entry.branch, data: dataUrl, at: FV.serverTimestamp() });
 }
 
-async function markReceived(entry, { amount, photo }) {
+async function markReceived(entry, { amount, photo, customerName }) {
   if (photo) await savePhoto(entry, photo);
   await db.runTransaction(async (tx) => {
     const eRef = db.doc(`entries/${entry.id}`);
@@ -901,7 +901,7 @@ async function markReceived(entry, { amount, photo }) {
     const holds = pruneHolds(t.holds, Date.now());
     delete holds[entry.id];
     tx.set(tRef, { month: entry.month, qrId: entry.qrId, received: (Number(t.received) || 0) + amount, holds });
-    tx.update(eRef, { status: "received", amount, receivedAt: FV.serverTimestamp(), receivedAtMs: Date.now(), hasPhoto: !!(e.hasPhoto || photo) });
+    tx.update(eRef, { status: "received", amount, customerName: (customerName || "").trim().slice(0, 60), receivedAt: FV.serverTimestamp(), receivedAtMs: Date.now(), hasPhoto: !!(e.hasPhoto || photo) });
   });
 }
 
@@ -923,7 +923,7 @@ async function cancelPayment(entry) {
 
 // Edit amount / add photo / delete on a received entry or adjustment.
 // Delete is soft (status "deleted") so history is never lost.
-async function editEntry(entry, { amount, photo, note, del }, role) {
+async function editEntry(entry, { amount, photo, note, customerName, del }, role) {
   if (photo) await savePhoto(entry, photo);
   await db.runTransaction(async (tx) => {
     const eRef = db.doc(`entries/${entry.id}`);
@@ -940,6 +940,7 @@ async function editEntry(entry, { amount, photo, note, del }, role) {
     if (del) { upd.status = "deleted"; upd.deletedAmount = e.amount; }
     else { upd.amount = newAmount; if (newAmount !== e.amount) upd.originalAmount = e.originalAmount ?? e.amount; }
     if (note !== undefined) upd.note = note;
+    if (customerName !== undefined) upd.customerName = customerName.trim().slice(0, 60);
     tx.update(eRef, upd);
   });
 }
@@ -1289,6 +1290,18 @@ function BillChoice({ amount, onChoose }) {
   );
 }
 
+function CustomerField({ value, onChange }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div className="row" style={{ marginBottom: 8 }}>
+        <label className="small grow" htmlFor="customer-name" style={{ fontWeight: 600 }}>Customer name</label>
+        <span className="badge">Optional</span>
+      </div>
+      <input id="customer-name" className="input" value={value} maxLength={60} autoComplete="off" placeholder="jaise Sharma ji" onChange={(e) => onChange(e.target.value)} />
+    </div>
+  );
+}
+
 function PhotoPicker({ value, onChange, required }) {
   const camRef = useRef(null), galRef = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -1539,6 +1552,7 @@ function ReceiveForm({ entry, photoRequired, onBack, onDone }) {
   const ask = useConfirm();
   const [amountStr, setAmountStr] = useState(String(entry.amount));
   const [photo, setPhoto] = useState(null);
+  const [customer, setCustomer] = useState("");
   const [busy, setBusy] = useState(false);
   const amount = parseAmount(amountStr);
   const changed = amount > 0 && amount !== entry.amount;
@@ -1547,7 +1561,7 @@ function ReceiveForm({ entry, photoRequired, onBack, onDone }) {
     if (photoRequired && !photo) { toast("Reference photo zaroori hai.", true); return; }
     if (changed && !(await ask({ title: "Amount badla hai", body: `${rupees(entry.amount)} ki jagah ${rupees(amount)} save karein?`, okLabel: "Haan, save karo" }))) return;
     setBusy(true);
-    try { await markReceived(entry, { amount, photo }); onDone(amount); }
+    try { await markReceived(entry, { amount, photo, customerName: customer }); onDone(amount); }
     catch (e) { toast(errMsg(e), true); setBusy(false); }
   }
   return (
@@ -1568,6 +1582,7 @@ function ReceiveForm({ entry, photoRequired, onBack, onDone }) {
           <div className="hint">{changed ? <span style={{ color: "var(--warn)", fontWeight: 600 }}>QR {rupees(entry.amount)} ka tha. Save karne pe {rupees(amount)} judega.</span> : "Customer ne alag amount bheja ho toh yahan sahi amount likhein."}</div>
         </label>
         <PhotoPicker value={photo} onChange={setPhoto} required={photoRequired} />
+        <CustomerField value={customer} onChange={setCustomer} />
       </div>
       <Overlay><div className="action-bar"><div>
         <button className="btn ok block big" disabled={busy || !(amount > 0) || (photoRequired && !photo)} onClick={save}>
@@ -1626,6 +1641,7 @@ function EntryList({ entries, role, now, onEdit, onPhoto, showBranch, selected, 
                 <span>{fmtDateTime(e.createdAtMs)}</span>
               </div>
               {e.originalAmount != null && e.status === "received" && <div className="tiny muted" style={{ marginTop: 2 }}>Pehle {rupees(e.originalAmount)} tha, edit: {e.editedBy}</div>}
+              {e.customerName && <div className="tiny ellipsis" style={{ marginTop: 3, color: "var(--ink-2)", fontWeight: 500 }}><Icon n="user" /> {e.customerName}</div>}
               {e.note && <div className="tiny muted" style={{ marginTop: 2 }}>Note: {e.note}</div>}
             </div>
             <div className="right">
@@ -1648,6 +1664,7 @@ function EditEntryModal({ entry, role, onClose }) {
   const [closing, close] = useSheet(onClose);
   const [amountStr, setAmountStr] = useState(String(entry.amount));
   const [note, setNote] = useState(entry.note || "");
+  const [customer, setCustomer] = useState(entry.customerName || "");
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const amount = parseAmount(amountStr);
@@ -1657,7 +1674,7 @@ function EditEntryModal({ entry, role, onClose }) {
     if (del && !(await ask({ title: "Entry delete karein?", body: `${entry.remark} ka ${rupees(entry.amount)} QR total se hat jaayega.`, okLabel: "Delete", danger: true }))) return;
     setBusy(true);
     try {
-      await editEntry(entry, { amount, photo, note: role.isAdmin ? note : undefined, del }, role);
+      await editEntry(entry, { amount, photo, note: role.isAdmin ? note : undefined, customerName: entry.type === "payment" ? customer : undefined, del }, role);
       toast(del ? "Entry delete ho gayi." : "Entry update ho gayi.");
       close();
     } catch (e) { toast(errMsg(e), true); setBusy(false); }
@@ -1676,6 +1693,7 @@ function EditEntryModal({ entry, role, onClose }) {
       {role.isAdmin && <label className="field"><span className="lbl">Note</span><input className="input" value={note} onChange={(e) => setNote(e.target.value)} /></label>}
       {entry.type === "payment" && <PhotoPicker value={photo} onChange={setPhoto} required={false} />}
       {entry.hasPhoto && !photo && <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>Photo pehle se hai. Nayi lagayenge toh purani replace ho jaayegi.</div>}
+      {entry.type === "payment" && <CustomerField value={customer} onChange={setCustomer} />}
       <div className="btn-row">
         <button className="btn ghost" style={{ color: "var(--bad)", flex: "0 0 auto" }} disabled={busy} onClick={() => save(true)}><Icon n="trash" />Delete</button>
         <button className="btn" disabled={busy} onClick={() => save(false)}>{busy ? <Spinner /> : <Icon n="check" />}Save</button>
@@ -1704,7 +1722,7 @@ function MyEntriesTab({ role, now }) {
         <div className="stat"><div className="v"><CountUp value={monthSum} /></div><div className="l">{monthLabel(month)}</div></div>
       </div>
       <div className="hint" style={{ margin: "0 2px 10px" }}><Icon n="lock-simple" /> Apni entry {EDIT_WINDOW_HOURS} ghante tak edit ya delete kar sakte hain, uske baad lock.</div>
-      <SearchBox value={search} onChange={setSearch} placeholder="Remark ya amount se dhoondo" />
+      <SearchBox value={search} onChange={setSearch} placeholder="Remark, amount ya customer" />
       <div className="card list">
         {s.loading ? <SkeletonList /> : s.error ? <Alert kind="red">{errMsg(s.error)}</Alert>
           : <EntryList entries={shown} role={role} now={now} onEdit={setEditing} onPhoto={setPhotoOf} />}
@@ -1853,7 +1871,7 @@ function Dashboard({ role, qrs, now }) {
           {selected ? <><Icon n="x" />Done</> : <><Icon n="check-square" />Select</>}
         </button>
       </div>
-      <SearchBox value={search} onChange={setSearch} placeholder="Remark, amount ya QR dhoondo" />
+      <SearchBox value={search} onChange={setSearch} placeholder="Remark, amount, customer, QR" />
       <div className="filters">
         <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)} aria-label="Status filter">
           <option value="received">Received</option><option value="pending">Pending</option>
@@ -2310,9 +2328,9 @@ async function exportXlsx(rep, meta) {
     ["Total", ...rep.branchRows.map((b) => b.total), rep.total],
   ], [24, ...rep.branchNames.map(() => 14), 16], bcols);
   addSheet("Entries", [
-    ["Date & time", "Remark", "Branch", "QR", "UPI ID", "Type", "Amount", "Note"],
-    ...rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), e.remark || "", e.branchName || "", e.qrName || "", e.upiId || "", e.qrBilled ? "Billed" : "Regular", Number(e.amount) || 0, e.note || ""]),
-  ], [22, 16, 14, 22, 26, 10, 14, 28], [6]);
+    ["Date & time", "Remark", "Branch", "QR", "UPI ID", "Type", "Amount", "Customer", "Note"],
+    ...rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), e.remark || "", e.branchName || "", e.qrName || "", e.upiId || "", e.qrBilled ? "Billed" : "Regular", Number(e.amount) || 0, e.customerName || "", e.note || ""]),
+  ], [22, 16, 14, 22, 26, 10, 14, 22, 28], [6]);
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
   return new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
@@ -2369,9 +2387,9 @@ async function exportPdf(rep, meta) {
     heading("Entries");
     table({
       styles: { fontSize: 8, cellPadding: 3 },
-      head: [["Date & time", "Remark", "Branch", "QR", "Type", "Amount"]],
-      body: rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), e.remark || "", e.branchName || "", e.qrName || "", e.qrBilled ? "Billed" : "Regular", rs(e.amount)]),
-      columnStyles: { 5: right },
+      head: [["Date & time", "Remark", "Customer", "Branch", "QR", "Type", "Amount"]],
+      body: rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), e.remark || "", e.customerName || "", e.branchName || "", e.qrName || "", e.qrBilled ? "Billed" : "Regular", rs(e.amount)]),
+      columnStyles: { 6: right },
     });
   } else {
     heading("Entries");
