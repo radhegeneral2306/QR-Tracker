@@ -2306,7 +2306,10 @@ async function exportPdf(rep, meta) {
     doc.autoTable({
       startY: y, margin: { left: 40, right: 40 }, styles: { fontSize: 9, cellPadding: 4 },
       headStyles: { fillColor: GREEN }, footStyles: { fillColor: [226, 240, 229], textColor: 20, fontStyle: "bold" },
-      alternateRowStyles: { fillColor: [247, 248, 245] }, ...opts,
+      alternateRowStyles: { fillColor: [247, 248, 245] },
+      // right-aligned columns must align in the header and total row too, not only the body
+      didParseCell: (d) => { const cs = (opts.columnStyles || {})[d.column.index]; if (cs && cs.halign && d.section !== "body") d.cell.styles.halign = cs.halign; },
+      ...opts,
     });
     y = doc.lastAutoTable.finalY + 24;
   };
