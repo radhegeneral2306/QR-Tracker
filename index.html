@@ -85,7 +85,7 @@
   --hero-1:     #14532d;
   --hero-2:     #0f4224;
 
-  --ok:         #2f7d32;
+  --ok:         #2b7430;
   --ok-soft:    #e3f3e4;
   --warn:       #9a610a;
   --warn-soft:  #fbefd0;
@@ -332,7 +332,7 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
 .btn.ghost:hover { background: var(--surface-2); }
 .btn.soft { background: var(--brand-soft); color: var(--brand-text); }
 .btn.soft:hover { filter: brightness(.98); }
-.btn.sm { padding: 8px 12px; font-size: 13.5px; border-radius: 10px; gap: 6px; }
+.btn.sm { min-height: 40px; padding: 8px 12px; font-size: 13.5px; border-radius: 10px; gap: 6px; }
 .btn.sm i { font-size: 16px; }
 .btn-row { display: flex; gap: 10px; }
 .btn-row > * { flex: 1; }
@@ -345,7 +345,7 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
   transform: translateX(calc(100% * var(--at))); background: var(--surface); border-radius: 9px; box-shadow: var(--shadow-1);
   transition: transform 380ms var(--ease-out);
 }
-.seg button { position: relative; border: 0; background: none; padding: 9px 8px; font-size: 13.5px; font-weight: 600; color: var(--muted); border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: color var(--t-med); }
+.seg button { position: relative; border: 0; background: none; padding: 11px 8px; font-size: 13.5px; font-weight: 600; color: var(--muted); border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: color var(--t-med); }
 .seg button.on { color: var(--ink); }
 
 /* toggle */
@@ -360,6 +360,8 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
   content: ""; position: absolute; width: 24px; height: 24px; left: 3px; top: 3px; background: #fdfdfb; border-radius: 50%;
   box-shadow: 0 1px 3px rgb(0 0 0 / .22); transition: transform 360ms var(--ease-spring);
 }
+/* invisible extra hit area around the 50x30 switch */
+.switch .sl::before { content: ""; position: absolute; inset: -8px; }
 .switch input:checked + .sl { background: var(--ok); }
 .switch input:checked + .sl::after { transform: translateX(20px); }
 .switch input:focus-visible + .sl { box-shadow: 0 0 0 4px var(--ring); }
@@ -426,8 +428,7 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
 .amt.neg { color: var(--bad); }
 .strike { text-decoration: line-through; color: var(--muted-2); font-weight: 500; }
 
-.filters { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 6px; margin: 0 -2px 6px; scrollbar-width: none; }
-.filters::-webkit-scrollbar { display: none; }
+.filters { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 2px 6px; margin: 0 -2px 6px; }
 .filters select { flex: none; width: auto; padding: 8px 12px; font-size: 14px; border-radius: 99px; }
 
 .sel-bar {
@@ -488,7 +489,7 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
 .grabber { width: 38px; height: 5px; border-radius: 99px; background: var(--line-2); margin: 2px auto 10px; }
 .sheet-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .sheet-head h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -.01em; flex: 1; }
-.sheet-head .icon-btn { background: var(--sunken); font-size: 17px; width: 34px; height: 34px; }
+.sheet-head .icon-btn { background: var(--sunken); font-size: 17px; width: 40px; height: 40px; }
 @media (min-width: 640px) {
   .sheet-bg { align-items: center; }
   .sheet { border-radius: 22px; animation-name: popIn; }
@@ -553,7 +554,7 @@ body.in-flow .toast { bottom: calc(110px + env(safe-area-inset-bottom)); }
 .search { position: relative; margin-bottom: 10px; }
 .search > .ph { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 18px; color: var(--muted-2); pointer-events: none; }
 .search > .input { padding-left: 42px; padding-right: 44px; border-radius: 99px; }
-.search > .icon-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; font-size: 16px; color: var(--muted); }
+.search > .icon-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; font-size: 16px; color: var(--muted); }
 .search > .input::-webkit-search-cancel-button { display: none; }
 .recon { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .recon:last-child { border-bottom: 0; }
@@ -1250,8 +1251,8 @@ function BillChoice({ amount, onChoose }) {
           <h3 id="bill-t">Bill chahiye?</h3>
           <p>{rupees(amount)} ka QR banane se pehle batao ki customer ko bill chahiye ya nahi.</p>
           <div className="btn-row">
-            <button className="btn ghost" disabled={closing} onClick={() => pick(false)}>Nahi</button>
-            <button className="btn" disabled={closing} onClick={() => pick(true)}>Haan, bill chahiye</button>
+            <button className="btn soft" disabled={closing} onClick={() => pick(false)}>Nahi</button>
+            <button className="btn soft" disabled={closing} onClick={() => pick(true)}>Haan, bill chahiye</button>
           </div>
           <button className="btn sm ghost block" style={{ border: 0, color: "var(--muted)" }} disabled={closing} onClick={() => pick(null)}>Wapas jao</button>
         </div>
@@ -1824,7 +1825,7 @@ function Dashboard({ role, qrs, now }) {
           {selected ? <><Icon n="x" />Done</> : <><Icon n="check-square" />Select</>}
         </button>
       </div>
-      <SearchBox value={search} onChange={setSearch} placeholder="Remark, amount, QR ya branch dhoondo" />
+      <SearchBox value={search} onChange={setSearch} placeholder="Remark, amount ya QR dhoondo" />
       <div className="filters">
         <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)} aria-label="Status filter">
           <option value="received">Received</option><option value="pending">Pending</option>
