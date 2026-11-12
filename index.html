@@ -72,6 +72,7 @@
   --ink-2:      #2f3a33;
   --muted:      #5b665e;
   --muted-2:    #87918a;
+  --placeholder: #69736c;
   --line:       #e2e6df;
   --line-2:     #cfd5cc;
   --track:      #e4e8e1;
@@ -124,6 +125,7 @@
     --ink-2:      #c9d3cb;
     --muted:      #98a49b;
     --muted-2:    #6f7b72;
+    --placeholder: #8f9b92;
     --line:       #26322a;
     --line-2:     #34423a;
     --track:      #2b3830;
@@ -286,7 +288,7 @@ button { cursor: pointer; -webkit-user-select: none; user-select: none; }
   padding: 12px 13px; font-size: 16px; outline: none; color: var(--ink);
   transition: border-color var(--t-fast) var(--ease-out), box-shadow var(--t-fast) var(--ease-out), background var(--t-fast);
 }
-.input::placeholder { color: var(--muted-2); }
+.input::placeholder { color: var(--placeholder); }
 .input:focus { border-color: var(--brand-2); background: var(--surface); box-shadow: 0 0 0 4px var(--ring); }
 .hint { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 .prefix-field { position: relative; }
@@ -550,6 +552,7 @@ body.in-flow .toast { bottom: calc(110px + env(safe-area-inset-bottom)); }
 .empty i { font-size: 34px; color: var(--muted-2); margin-bottom: 4px; }
 .empty b { color: var(--ink-2); font-weight: 600; }
 
+.clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .badge.brand { background: var(--brand-soft); color: var(--brand-text); }
 .search { position: relative; margin-bottom: 10px; }
 .search > .ph { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 18px; color: var(--muted-2); pointer-events: none; }
@@ -1668,7 +1671,7 @@ function EntryList({ entries, role, now, onEdit, onPhoto, showBranch, selected, 
                 <span>{fmtDateTime(e.createdAtMs)}</span>
               </div>
               {e.originalAmount != null && e.status === "received" && <div className="tiny muted" style={{ marginTop: 2 }}>Pehle {rupees(e.originalAmount)} tha, edit: {e.editedBy}</div>}
-              {e.customerName && <div className="tiny ellipsis" style={{ marginTop: 3, color: "var(--ink-2)", fontWeight: 500 }}><Icon n="user" /> {e.customerName}</div>}
+              {e.customerName && <div className="tiny clamp2" style={{ marginTop: 3, color: "var(--ink-2)", fontWeight: 500 }}><Icon n="user" /> {e.customerName}</div>}
               {e.note && <div className="tiny muted" style={{ marginTop: 2 }}>Note: {e.note}</div>}
             </div>
             <div className="right">
