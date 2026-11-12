@@ -2420,7 +2420,8 @@ async function exportPdf(rep, meta) {
       styles: { fontSize: 8, cellPadding: 3 },
       head: [["Date & time", "Remark", "Customer", "Branch", "QR", "Type", "Amount"]],
       body: rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), pt(e.remark), pt(e.customerName), pt(e.branchName), pt(e.qrName), e.qrBilled ? "Billed" : "Regular", rs(e.amount)]),
-      columnStyles: { 6: right },
+      // fixed widths (A4 gives 515 pt): a long unbroken customer name must wrap inside its own column, not squeeze the date
+      columnStyles: { 0: { cellWidth: 92 }, 1: { cellWidth: 56 }, 2: { cellWidth: 110 }, 3: { cellWidth: 55 }, 4: { cellWidth: 70 }, 5: { cellWidth: 40 }, 6: { cellWidth: 72, halign: "right" } },
     });
   } else {
     heading("Entries");
