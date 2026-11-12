@@ -104,7 +104,7 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 
 1. Amount daalo, phir **QR banao** dabao.
 2. Customer ko QR dikhao.
-3. Paisa account mein aa jaaye tab **✓ Payment received** dabao (photo zaroori ho toh photo lo), phir Save.
+3. Paisa account mein aa jaaye tab **✓ Payment received** dabao (photo zaroori ho toh photo lo). Chaho toh **Customer name** (optional) bhi likho, taaki baad mein pata chale ki yeh payment kis customer ki thi. Phir Save.
    Payment nahi hui toh **Cancel** dabao.
 4. Koi payment beech mein reh gayi ho toh woh **Open payments** list mein dikhegi. Wahan se kholke Received ya Cancel karo.
 
@@ -138,16 +138,16 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 
 - **Month summary:** mahine ka final total, billed vs regular total, har QR ka final total aur branch-wise total ek screen pe. Agar payments pending hain toh mahina badalne se pehle yellow reminder dikhta hai. Agar QR total aur entries mein farak ho, toh red alert aata hai (Dashboard pe Recalculate dabao).
 - **Bank milaan:** har QR ke saamne bank statement ka total daalo. App dikhati hai ki farak kitna hai. Farak ho toh **Adjust** dabane se ek Adjustment entry ban jaati hai aur total theek ho jaata hai.
-- **Report download:** Daily (ek din), Monthly (upar chuna hua mahina) ya Custom (from-to). **Excel** aur **PDF** dono milte hain, jisme branch-wise aur QR-wise total hota hai. Excel mein QR x Branch table aur poori entries ki list bhi hoti hai. PDF mein amount "Rs." se likha aata hai.
+- **Report download:** Daily (ek din), Monthly (upar chuna hua mahina) ya Custom (from-to). **Excel** aur **PDF** dono milte hain, jisme branch-wise aur QR-wise total hota hai. Excel mein QR x Branch table aur poori entries ki list bhi hoti hai. PDF mein amount "Rs." se likha aata hai, aur Hindi ya emoji wale naam "?" ban jaate hain (Excel mein sahi dikhte hain).
   - iPhone pe report download ke bajaye Share sheet khulti hai, wahan se "Save to Files" chuno.
   - Report banate waqt internet chahiye (Excel/PDF library pehli baar download hoti hai).
   - Daily/Custom report entry ki tareekh (kab banayi) se banti hai, Monthly report mahine se. Isliye pichle mahine ke liye aaj lagayi hui Adjustment entry Daily report mein aaj ki tareekh pe dikhegi, par Monthly report mein pichle mahine mein.
 
 ## Search
 
-Dashboard aur branch ke Entries tab mein search box hai. Remark (jaise `Raipur 0004` ya `0004`), amount (jaise `15000`), QR ka naam ya branch se dhoondh sakte ho. Search sirf us mahine mein hota hai jo screen pe chuna hua hai.
+Dashboard aur branch ke Entries tab mein search box hai. Remark (jaise `Raipur 0004` ya `0004`), amount (jaise `15000`), customer ka naam, QR ka naam ya branch se dhoondh sakte ho. Search sirf us mahine mein hota hai jo screen pe chuna hua hai.
 
 ## Known limits (honest list)
 
 - Koi branch ka banda technical tareeke se (browser console se) QR totals ke numbers chhed sakta hai. Entries aur 24 ghante ka lock server pe protected hain, lekin running totals nahi. Agar aisa shak ho, toh **Recalculate** dabane se totals entries se sahi ho jaate hain.
-- Photos ~200 KB tak compress hoti hain. Free plan mein 1 GB tak jagah milti hai, yaani lagbhag 4,000-5,000 photos. Usse zyada ho jaayein toh purani photos hatani padengi ya Blaze plan lena padega.
+- Reference photos bahut chhoti (aam taur pe 10-60 KB) compress hokar save hoti hain, taaki Firebase ki free jagah (1 GB) zyada chale. Payment screenshot ka text phir bhi padhne layak rehta hai. Original QR ki photo compress nahi hoti, jaisi upload karo waisi save hoti hai (sirf bahut badi photo Firebase ki 1 MB limit ki wajah se chhoti ki jaati hai).
