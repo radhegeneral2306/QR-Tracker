@@ -134,6 +134,7 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 - **Report download:** Daily (ek din), Monthly (upar chuna hua mahina) ya Custom (from-to). **Excel** aur **PDF** dono milte hain, jisme branch-wise aur QR-wise total hota hai. Excel mein QR x Branch table aur poori entries ki list bhi hoti hai. PDF mein amount "Rs." se likha aata hai.
   - iPhone pe report download ke bajaye Share sheet khulti hai, wahan se "Save to Files" chuno.
   - Report banate waqt internet chahiye (Excel/PDF library pehli baar download hoti hai).
+  - Daily/Custom report entry ki tareekh (kab banayi) se banti hai, Monthly report mahine se. Isliye pichle mahine ke liye aaj lagayi hui Adjustment entry Daily report mein aaj ki tareekh pe dikhegi, par Monthly report mein pichle mahine mein.
 
 ## Search
 

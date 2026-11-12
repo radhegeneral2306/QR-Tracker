@@ -696,7 +696,7 @@ function matchEntry(e, query) {
   const amt = String(Math.abs(Number(e.amount) || 0));
   return s.split(/\s+/).every((tok) => {
     if (hay.includes(tok)) return true;
-    const digits = tok.replace(/[,₹]/g, "");
+    const digits = tok.replace(/[,₹-]/g, "").replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
     return /^\d+(\.\d+)?$/.test(digits) && (amt === digits || (digits.length >= 3 && amt.includes(digits)));
   });
 }
@@ -924,7 +924,7 @@ async function addAdjustment({ month, qr, amount, note }) {
     const now = Date.now();
     tx.set(tRef, { month, qrId: qr.id, received: (Number(t.received) || 0) + amount, holds: pruneHolds(t.holds, now) });
     tx.set(db.collection("entries").doc(), {
-      type: "adjustment", status: "received", qrId: qr.id, qrName: qr.name, upiId: qr.upiId,
+      type: "adjustment", status: "received", qrId: qr.id, qrName: qr.name, upiId: qr.upiId, qrBilled: !!qr.billed,
       amount, remark: "Adjustment", note: note || "", month,
       branch: ADMIN_EMAIL, branchId: "admin", branchName: "Owner",
       createdAt: FV.serverTimestamp(), createdAtMs: now, hasPhoto: false,
@@ -1354,6 +1354,7 @@ function ReceiveTab({ role, settings, qrs, totals, now, onFlowChange }) {
   const amount = parseAmount(amountStr);
 
   function generate() {
+    if (busy || billAsk) return;
     if (!(amount > 0)) { toast("Sahi amount daalein.", true); return; }
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     setBillAsk(true);
@@ -2355,8 +2356,8 @@ async function saveBlob(blob, name) {
   const file = new File([blob], name, { type: blob.type });
   const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
   if (ios && navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: name }); } catch (e) { if (e.name !== "AbortError") throw e; }
-    return;
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (e) { if (e.name === "AbortError") return; /* e.g. NotAllowedError after a slow report: download normally */ }
   }
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -2376,6 +2377,7 @@ function ReportsTab({ qrs, now }) {
   const [dl, setDl] = useState(null);          // "xlsx" | "pdf" while a report is being made
   const [bank, setBank] = useState({});        // qrId -> bank statement total (text)
   const [busyId, setBusyId] = useState(null);
+  useEffect(() => { setBank({}); }, [month]);   // typed bank totals belong to one month only
 
   const totalsS = useSnapshot(() => db.collection("totals").where("month", "==", month), [month]);
   const entriesS = useSnapshot(() => db.collection("entries").where("month", "==", month), [month]);
