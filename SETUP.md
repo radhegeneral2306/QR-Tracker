@@ -138,7 +138,7 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 
 - **Month summary:** mahine ka final total, billed vs regular total, har QR ka final total aur branch-wise total ek screen pe. Agar payments pending hain toh mahina badalne se pehle yellow reminder dikhta hai. Agar QR total aur entries mein farak ho, toh red alert aata hai (Dashboard pe Recalculate dabao).
 - **Bank milaan:** har QR ke saamne bank statement ka total daalo. App dikhati hai ki farak kitna hai. Farak ho toh **Adjust** dabane se ek Adjustment entry ban jaati hai aur total theek ho jaata hai.
-- **Report download:** Daily (ek din), Monthly (upar chuna hua mahina) ya Custom (from-to). **Excel** aur **PDF** dono milte hain, jisme branch-wise aur QR-wise total hota hai. Excel mein QR x Branch table aur poori entries ki list bhi hoti hai. PDF mein amount "Rs." se likha aata hai.
+- **Report download:** Daily (ek din), Monthly (upar chuna hua mahina) ya Custom (from-to). **Excel** aur **PDF** dono milte hain, jisme branch-wise aur QR-wise total hota hai. Excel mein QR x Branch table aur poori entries ki list bhi hoti hai. PDF mein amount "Rs." se likha aata hai, aur Hindi ya emoji wale naam "?" ban jaate hain (Excel mein sahi dikhte hain).
   - iPhone pe report download ke bajaye Share sheet khulti hai, wahan se "Save to Files" chuno.
   - Report banate waqt internet chahiye (Excel/PDF library pehli baar download hoti hai).
   - Daily/Custom report entry ki tareekh (kab banayi) se banti hai, Monthly report mahine se. Isliye pichle mahine ke liye aaj lagayi hui Adjustment entry Daily report mein aaj ki tareekh pe dikhegi, par Monthly report mein pichle mahine mein.

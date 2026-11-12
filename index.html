@@ -788,7 +788,7 @@ function drawScaled(img, maxDim) {
   ctx.drawImage(img, 0, 0, c.width, c.height);
   return { c, ctx };
 }
-// Photos are stored inside Firestore (free plan), so they are squeezed hard:
+// Photos are stored inside Firestore (free plan), so they are squeezed hard (longest side up to 1400 px):
 // WebP where the browser can encode it (about a third smaller than JPEG at the
 // same look; iPhone Safari falls back to JPEG), shrunk and lowered in quality
 // step by step until under maxChars. Reference photos aim for ~60 KB, which
@@ -801,15 +801,17 @@ function webpOk() {
   }
   return _webpOk;
 }
-async function compressImage(file, { maxDim = 960, maxChars = 85000, quality = 0.6, minQuality = 0.4, minDim = 560, hardMax = 300000 } = {}) {
+async function compressImage(file, { maxDim = 1400, maxChars = 85000, quality = 0.6, minQuality = 0.4, minDim = 700, hardMax = 300000 } = {}) {
   const { img, revoke } = await loadImage(file);
   try {
     const type = webpOk() ? "image/webp" : "image/jpeg";
+    const target = type === "image/webp" ? maxChars : Math.round(maxChars * 1.4);   // JPEG is about 40% bigger at the same look
     let dim = maxDim, q = quality, last = "";
     for (let i = 0; i < 16; i++) {
       const { c } = drawScaled(img, dim);
       last = c.toDataURL(type, q);
-      if (last.length <= maxChars) return last;
+      c.width = c.height = 0;   // release the canvas memory right away (iPhone Safari is strict)
+      if (last.length <= target) return last;
       if (q > minQuality + 0.001) q = Math.max(minQuality, q - 0.07);
       else if (dim > minDim) dim = Math.max(minDim, Math.round(dim * 0.85));
       else break;
@@ -2368,6 +2370,7 @@ async function exportPdf(rep, meta) {
   // jsPDF's built-in font has no rupee sign, so the PDF writes "Rs.".
   const rs = (n) => "Rs. " + (Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const GREEN = [20, 83, 45];
+  const pt = (t) => String(t == null ? "" : t).replace(/[^\x20-\x7E\u00A0-\u00FF]/g, "?");   // built-in PDF font: no Devanagari or emoji
   doc.setFont("helvetica", "bold"); doc.setFontSize(18); doc.setTextColor(...GREEN); doc.text("QR Tracker report", 40, 50);
   doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(60); doc.text(meta.label, 40, 68);
   doc.setFontSize(9); doc.setTextColor(120); doc.text("Generated " + fmtDateTimeY(Date.now()) + " (IST)", 40, 82);
@@ -2397,14 +2400,14 @@ async function exportPdf(rep, meta) {
   heading("Branch-wise");
   table({
     head: [["Branch", "Entries", "Total"]],
-    body: rep.branchRows.map((r) => [r.name, String(r.count), rs(r.total)]),
+    body: rep.branchRows.map((r) => [pt(r.name), String(r.count), rs(r.total)]),
     foot: [["Total", String(rep.count), rs(rep.total)]],
     columnStyles: { 1: right, 2: right },
   });
   heading("QR-wise");
   table({
     head: [["QR", "UPI ID", "Type", "Entries", "Total"]],
-    body: rep.qrRows.map((r) => [r.name, r.upi, r.billed ? "Billed" : "Regular", String(r.count), rs(r.total)]),
+    body: rep.qrRows.map((r) => [pt(r.name), pt(r.upi), r.billed ? "Billed" : "Regular", String(r.count), rs(r.total)]),
     foot: [["Total", "", "", String(rep.count), rs(rep.total)]],
     columnStyles: { 3: right, 4: right },
   });
@@ -2413,7 +2416,7 @@ async function exportPdf(rep, meta) {
     table({
       styles: { fontSize: 8, cellPadding: 3 },
       head: [["Date & time", "Remark", "Customer", "Branch", "QR", "Type", "Amount"]],
-      body: rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), e.remark || "", e.customerName || "", e.branchName || "", e.qrName || "", e.qrBilled ? "Billed" : "Regular", rs(e.amount)]),
+      body: rep.rec.map((e) => [fmtDateTimeY(e.createdAtMs), pt(e.remark), pt(e.customerName), pt(e.branchName), pt(e.qrName), e.qrBilled ? "Billed" : "Regular", rs(e.amount)]),
       columnStyles: { 6: right },
     });
   } else {
