@@ -1124,7 +1124,7 @@ function useQrReset(role) {
     const u = usageFor(total, Date.now());
     const ok = await ask({
       title: `${q.name} ka limit reset karein?`,
-      body: `Abhi ${rupees(u.received)} use hua hai${u.held ? `, aur ${rupees(u.held)} pending payment reserve hai (woh bani rahegi)` : ""}. Reset ke baad counter 0 se shuru hoga. Purani entries aur reports waise hi rahenge.`,
+      body: `Abhi ${rupees(u.received)} use hua hai. Reset ke baad ginti 0 se shuru hogi${u.held ? ` (${rupees(u.held)} pending payment phir bhi limit mein ginegi)` : ""}. Purani entries aur reports waise hi rahenge.`,
       okLabel: "Reset karo", icon: "arrow-counter-clockwise",
     });
     if (!ok) return false;
@@ -1835,20 +1835,20 @@ function QrUsageCard({ q, total, now, today, live, onReset }) {
       </div>
       <UsageBar used={u.used} limit={q.limit} />
       <div className="row tiny muted num" style={{ marginTop: 6 }}>
-        <span className="grow">{rupees(u.received)} received{u.held ? `, ${rupees(u.held)} pending` : ""}</span>
+        <span className="grow">{rupees(u.received)} {live ? "use hua" : "received"}{u.held ? `, ${rupees(u.held)} pending` : ""}</span>
         <span><b style={{ color: "var(--ink-2)" }}>{pct(u.used, q.limit)}%</b> of {rupees(q.limit)}</span>
       </div>
       {live && <div className="row tiny muted" style={{ marginTop: 10 }}>
         <span className="grow">{resetNote(total)}</span>
-        {onReset && !q.archived && <button className="btn sm ghost" onClick={() => onReset(q, total)}><Icon n="arrow-counter-clockwise" />Reset</button>}
+        {onReset && !q.archived && <button className="btn sm soft" onClick={() => onReset(q, total)}><Icon n="arrow-counter-clockwise" />Reset</button>}
       </div>}
     </div>
   );
 }
 function resetNote(total) {
-  if (total && total.lastReset) return `Last reset: ${fmtDateTime(total.lastReset.atMs)}`;
-  if (total && total.cycleStartedAtMs) return `Count shuru: ${fmtDate(dayKey(total.cycleStartedAtMs))}`;
-  return "Abhi tak reset nahi hua";
+  if (total && total.lastReset) return `Last reset: ${fmtDateTimeY(total.lastReset.atMs)}`;
+  if (total && total.cycleStartedAtMs) return `Reset nahi hua, ginti ${fmtDate(dayKey(total.cycleStartedAtMs))} se chal rahi hai`;
+  return "Reset nahi hua";
 }
 
 function Dashboard({ role, qrs, now, liveTotals }) {
@@ -2142,7 +2142,7 @@ function QrsTab({ qrs, settings, now, role, totals }) {
                 </> : <>
                   <button className="btn sm ghost" disabled={busy} onClick={() => setEditing(q)}><Icon n="pencil-simple" />Edit</button>
                   <button className="btn sm ghost" disabled={busy} onClick={() => archive(q)}><Icon n="archive" />Archive</button>
-                  <button className="btn sm ghost" disabled={busy} onClick={() => resetQr(q, total)}><Icon n="arrow-counter-clockwise" />Reset</button>
+                  <button className="btn sm soft" disabled={busy} onClick={() => resetQr(q, total)}><Icon n="arrow-counter-clockwise" />Reset</button>
                 </>}
               </div>
             </div>
@@ -2249,9 +2249,9 @@ function QrForm({ qr, onClose }) {
       <label className="field"><span className="lbl">Account holder ka naam</span><input className="input" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} />
         <div className="hint">Customer ke UPI app mein yahi naam dikhega.</div>
       </label>
-      <label className="field"><span className="lbl">Limit (reset karne tak)</span>
+      <label className="field"><span className="lbl">Limit (jab tak Reset na karo)</span>
         <div className="prefix-field"><span>₹</span><input className="input num" inputMode="numeric" placeholder="100000" value={limitStr} onChange={(e) => setLimitStr(e.target.value.replace(/[^0-9.,]/g, ""))} /></div>
-        {parseAmount(limitStr) > 0 && <div className="hint num">{rupees(parseAmount(limitStr))}</div>}
+        <div className="hint num">{parseAmount(limitStr) > 0 ? rupees(parseAmount(limitStr)) + ". " : ""}Itna amount aane par QR band hoga. Ginti tab tak chalti rehti hai jab tak Owner Reset na dabaye.</div>
       </label>
       <div className="card flat" style={{ padding: "2px 14px", background: "var(--surface-2)" }}>
         <Toggle label="Enabled" sub="Off karne par yeh QR kabhi nahi dikhega" checked={enabled} onChange={setEnabled} />
