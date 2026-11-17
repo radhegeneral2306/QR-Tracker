@@ -997,7 +997,7 @@ async function editEntry(entry, { amount, photo, note, customerName, del }, role
     const newAmount = del ? 0 : (amount ?? e.amount);
     // an entry from before the last reset is history: changing it must not move the counter
     const delta = inCycle(e, live.data) ? newAmount - e.amount : 0;
-    putLive(tx, live, { received: round2((Number(live.data.received) || 0) + delta), holds: pruneHolds(live.data.holds, Date.now()) });
+    putLive(tx, live, { received: Math.max(0, round2((Number(live.data.received) || 0) + delta)), holds: pruneHolds(live.data.holds, Date.now()) });
     const upd = { editedAtMs: Date.now(), editedBy: role.name, hasPhoto: !!(e.hasPhoto || photo) };
     if (del) { upd.status = "deleted"; upd.deletedAmount = e.amount; }
     else { upd.amount = newAmount; if (newAmount !== e.amount) upd.originalAmount = e.originalAmount ?? e.amount; }
@@ -1012,9 +1012,12 @@ async function addAdjustment({ month, qr, amount, note }) {
   await db.runTransaction(async (tx) => {
     const live = await readLive(tx, qr.id);
     const now = Date.now();
-    putLive(tx, live, { received: round2((Number(live.data.received) || 0) + amount), holds: pruneHolds(live.data.holds, now) });
+    // An adjustment for a month before this cycle began corrects history only: -1 never matches a real cycle,
+    // so it is left out of the limit counter now and whenever the counter is rebuilt.
+    const counts = month >= monthKey(Number(live.data.cycleStartedAtMs) || 0);
+    putLive(tx, live, { received: round2((Number(live.data.received) || 0) + (counts ? amount : 0)), holds: pruneHolds(live.data.holds, now) });
     tx.set(db.collection("entries").doc(), {
-      type: "adjustment", status: "received", cycleStart: Number(live.data.cycleStartedAtMs) || 0, qrId: qr.id, qrName: qr.name, upiId: qr.upiId, qrBilled: !!qr.billed,
+      type: "adjustment", status: "received", cycleStart: counts ? (Number(live.data.cycleStartedAtMs) || 0) : -1, qrId: qr.id, qrName: qr.name, upiId: qr.upiId, qrBilled: !!qr.billed,
       amount, remark: "Adjustment", note: note || "", month,
       branch: ADMIN_EMAIL, branchId: "admin", branchName: "Owner",
       createdAt: FV.serverTimestamp(), createdAtMs: now, hasPhoto: false,
@@ -1066,7 +1069,7 @@ async function bulkDeleteEntries(entries, role) {
             tx.update(snap.ref, { status: "cancelled", cancelledAtMs: now, editedBy: role.name });
           }
         });
-        putLive(tx, live, { received: round2(received), holds });
+        putLive(tx, live, { received: Math.max(0, round2(received)), holds });
       });
       done += chunk.length;
     }
@@ -2700,14 +2703,14 @@ function Main({ role }) {
   }, [liveS.data, legacyS.data]);
   const ensured = useRef({});
   useEffect(() => {
-    if (!role.isAdmin || liveS.loading || qrsS.loading || !qrsS.data) return;
+    if (liveS.loading || qrsS.loading || !qrsS.data) return;   // any login does this, so the old counter is carried over before a month change can empty it
     const have = new Set((liveS.data || []).map((t) => t.qrId));
     qrsS.data.forEach((q) => {
       if (have.has(q.id) || ensured.current[q.id]) return;
       ensured.current[q.id] = true;
       ensureLive(q.id).catch(() => { ensured.current[q.id] = false; });
     });
-  }, [liveS.data, qrsS.data, role.isAdmin]);
+  }, [liveS.data, qrsS.data]);
   const settings = { ...DEFAULT_SETTINGS, ...(settingsS.data || {}) };
   const qrs = qrsS.data || [];
   useEffect(() => { document.body.classList.toggle("in-flow", inFlow); }, [inFlow]);

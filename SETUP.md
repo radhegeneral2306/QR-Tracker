@@ -125,7 +125,7 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 - **Reset button** har QR ke saath hai (sirf Owner ko dikhta hai): QRs tab, Dashboard aur Reports tab ke QR cards mein. Dabane se pehle confirm poochta hai.
 - **Reset karne se kya hota hai:** sirf us QR ka limit counter 0 se shuru hota hai. Purani entries, reports aur month ka hisaab waise hi rehta hai. Jo payments abhi pending hain, woh reserve rehti hain. QR card pe "Last reset" ki tareekh dikhti hai.
 - **Reset se pehle ki entries:** unhe baad mein edit ya delete karne se counter nahi badalta (woh purani history hai). Reset ke baad ki entries counter badalti hain.
-- **Adjustment** (bank milaan) counter ko bhi badalta hai. **Recalculate** counter ko last reset ke baad ki entries se dobara banata hai.
+- **Adjustment** (bank milaan) counter ko tab badalta hai jab woh us mahine ki ho jisme counter chal raha hai ya uske baad ki. Counter shuru hone se pehle ke mahine ki Adjustment sirf us mahine ka hisaab theek karti hai. **Recalculate** counter ko last reset ke baad ki entries se dobara banata hai.
 - Reports aur Dashboard ka **mahine wala total** (kitna aaya) alag cheez hai, woh hamesha entries se aata hai aur reset se nahi badalta.
 - Jab pehli baar yeh version chala, har QR ka counter us mahine ke total se aage chala (kuch achanak zero nahi hua). Chaaho toh us QR ka Reset dabake zero kar sakte ho.
 
