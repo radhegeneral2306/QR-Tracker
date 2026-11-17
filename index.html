@@ -871,7 +871,44 @@ function errMsg(e) {
 /* =========================================================
    DATA WRITES (all limit-affecting writes are transactions)
    ========================================================= */
+// A QR's limit counter is NOT tied to the calendar month: it keeps adding up until the
+// owner presses Reset. One live doc per QR (totals/live_{qrId}) holds received, holds and
+// cycleStartedAtMs. Entries, reports and month views are never touched by a reset.
+const liveRef = (qrId) => db.doc(`totals/live_${qrId}`);
+// The old per-month docs; now only read once to carry a QR's counter over.
 const totalRef = (month, qrId) => db.doc(`totals/${month}_${qrId}`);
+function monthStartMs(mk) { const [y, m] = mk.split("-").map(Number); return Date.UTC(y, m - 1, 1) - IST_OFFSET_MS; }
+// Does this entry count toward the QR's current counter? Entries record the cycle they were
+// counted in (cycleStart); older entries are placed by their time instead.
+function inCycle(e, live) {
+  if (e.cycleStart != null) return Number(e.cycleStart) === Number(live.cycleStartedAtMs);
+  return (Number(e.receivedAtMs || e.createdAtMs) || 0) >= (Number(live.cycleStartedAtMs) || 0);
+}
+// Read a QR's live counter inside a transaction (all reads must come before any write).
+// First use after the switch from monthly totals: carry on from this month's old counter.
+async function readLive(tx, qrId) {
+  const ref = liveRef(qrId);
+  const snap = await tx.get(ref);
+  if (snap.exists) return { ref, data: snap.data(), existed: true };
+  const mk = monthKey();
+  const old = (await tx.get(totalRef(mk, qrId))).data() || {};
+  return { ref, existed: false, data: { kind: "live", qrId, received: Number(old.received) || 0, holds: old.holds || {}, cycleStartedAtMs: monthStartMs(mk) } };
+}
+function putLive(tx, live, changes) { tx.set(live.ref, { ...live.data, kind: "live", ...changes }); }
+async function ensureLive(qrId) {
+  await db.runTransaction(async (tx) => { const live = await readLive(tx, qrId); if (!live.existed) putLive(tx, live, {}); });
+}
+// Owner: start this QR's counter again from zero. Pending (reserved) payments stay reserved.
+async function resetQrLimit(qr, role) {
+  const now = Date.now();
+  return db.runTransaction(async (tx) => {
+    const live = await readLive(tx, qr.id);
+    const previousReceived = round2(live.data.received);
+    putLive(tx, live, { received: 0, holds: pruneHolds(live.data.holds, now), cycleStartedAtMs: now, lastReset: { atMs: now, by: role.name, previousReceived } });
+    tx.set(db.doc(`totals/reset_${qr.id}_${now}`), { kind: "reset", qrId: qr.id, atMs: now, by: role.name, previousReceived, previousStartedAtMs: Number(live.data.cycleStartedAtMs) || 0 });
+    return previousReceived;
+  });
+}
 
 // Pick the first QR (highest limit first) that can take this amount, put a
 // hold on it and create a pending entry with the next remark number.
@@ -882,12 +919,12 @@ async function reservePayment({ role, qrs, margin, amount, billRequired }) {
   return db.runTransaction(async (tx) => {
     const counterRef = db.doc(`counters/${month}_${role.id}`);
     const cSnap = await tx.get(counterRef);
-    const tSnaps = [];
-    for (const q of cands) tSnaps.push(await tx.get(totalRef(month, q.id)));
+    const lives = [];
+    for (const q of cands) lives.push(await readLive(tx, q.id));
     const now = Date.now();
     let idx = -1;
     for (let i = 0; i < cands.length; i++) {
-      const u = usageFor(tSnaps[i].data(), now);
+      const u = usageFor(lives[i].data, now);
       if (qrFits(u.used, Number(cands[i].limit), amount, margin)) { idx = i; break; }
     }
     if (idx < 0) throw new Error(billRequired ? "NO_BILLED_QR_FIT" : "NO_QR");
@@ -895,10 +932,9 @@ async function reservePayment({ role, qrs, margin, amount, billRequired }) {
     const n = ((cSnap.exists && cSnap.data().n) || 0) + 1;
     const remark = `${role.remarkName} ${String(n).padStart(4, "0")}`;
     const entryRef = db.collection("entries").doc();
-    const t = tSnaps[idx].data() || {};
-    const holds = pruneHolds(t.holds, now);
+    const holds = pruneHolds(lives[idx].data.holds, now);
     holds[entryRef.id] = { amount, at: now };
-    tx.set(totalRef(month, qr.id), { month, qrId: qr.id, received: Number(t.received) || 0, holds });
+    putLive(tx, lives[idx], { holds });
     tx.set(counterRef, { n });
     const entry = {
       type: "payment", status: "pending",
@@ -921,32 +957,28 @@ async function markReceived(entry, { amount, photo, customerName }) {
   if (photo) await savePhoto(entry, photo);
   await db.runTransaction(async (tx) => {
     const eRef = db.doc(`entries/${entry.id}`);
-    const tRef = totalRef(entry.month, entry.qrId);
     const eSnap = await tx.get(eRef);
-    const tSnap = await tx.get(tRef);
+    const live = await readLive(tx, entry.qrId);
     if (!eSnap.exists) throw new Error("NOT_FOUND");
     const e = eSnap.data();
     if (e.status !== "pending") throw new Error("ALREADY_DONE");
-    const t = tSnap.data() || {};
-    const holds = pruneHolds(t.holds, Date.now());
+    const holds = pruneHolds(live.data.holds, Date.now());
     delete holds[entry.id];
-    tx.set(tRef, { month: entry.month, qrId: entry.qrId, received: (Number(t.received) || 0) + amount, holds });
-    tx.update(eRef, { status: "received", amount, customerName: (customerName || "").trim().slice(0, 60), receivedAt: FV.serverTimestamp(), receivedAtMs: Date.now(), hasPhoto: !!(e.hasPhoto || photo) });
+    putLive(tx, live, { received: round2((Number(live.data.received) || 0) + amount), holds });
+    tx.update(eRef, { status: "received", amount, cycleStart: Number(live.data.cycleStartedAtMs) || 0, customerName: (customerName || "").trim().slice(0, 60), receivedAt: FV.serverTimestamp(), receivedAtMs: Date.now(), hasPhoto: !!(e.hasPhoto || photo) });
   });
 }
 
 async function cancelPayment(entry) {
   await db.runTransaction(async (tx) => {
     const eRef = db.doc(`entries/${entry.id}`);
-    const tRef = totalRef(entry.month, entry.qrId);
     const eSnap = await tx.get(eRef);
-    const tSnap = await tx.get(tRef);
+    const live = await readLive(tx, entry.qrId);
     if (!eSnap.exists) throw new Error("NOT_FOUND");
     if (eSnap.data().status !== "pending") throw new Error("ALREADY_DONE");
-    const t = tSnap.data() || {};
-    const holds = pruneHolds(t.holds, Date.now());
+    const holds = pruneHolds(live.data.holds, Date.now());
     delete holds[entry.id];
-    tx.set(tRef, { month: entry.month, qrId: entry.qrId, received: Number(t.received) || 0, holds });
+    putLive(tx, live, { holds });
     tx.update(eRef, { status: "cancelled", cancelledAtMs: Date.now() });
   });
 }
@@ -957,15 +989,15 @@ async function editEntry(entry, { amount, photo, note, customerName, del }, role
   if (photo) await savePhoto(entry, photo);
   await db.runTransaction(async (tx) => {
     const eRef = db.doc(`entries/${entry.id}`);
-    const tRef = totalRef(entry.month, entry.qrId);
     const eSnap = await tx.get(eRef);
-    const tSnap = await tx.get(tRef);
+    const live = await readLive(tx, entry.qrId);
     if (!eSnap.exists) throw new Error("NOT_FOUND");
     const e = eSnap.data();
     if (e.status !== "received") throw new Error("ALREADY_DONE");
     const newAmount = del ? 0 : (amount ?? e.amount);
-    const t = tSnap.data() || {};
-    tx.set(tRef, { month: entry.month, qrId: entry.qrId, received: (Number(t.received) || 0) + newAmount - e.amount, holds: pruneHolds(t.holds, Date.now()) });
+    // an entry from before the last reset is history: changing it must not move the counter
+    const delta = inCycle(e, live.data) ? newAmount - e.amount : 0;
+    putLive(tx, live, { received: round2((Number(live.data.received) || 0) + delta), holds: pruneHolds(live.data.holds, Date.now()) });
     const upd = { editedAtMs: Date.now(), editedBy: role.name, hasPhoto: !!(e.hasPhoto || photo) };
     if (del) { upd.status = "deleted"; upd.deletedAmount = e.amount; }
     else { upd.amount = newAmount; if (newAmount !== e.amount) upd.originalAmount = e.originalAmount ?? e.amount; }
@@ -975,16 +1007,14 @@ async function editEntry(entry, { amount, photo, note, customerName, del }, role
   });
 }
 
-// Owner-only manual correction (+ or -) on a QR's month total.
+// Owner-only manual correction (+ or -). It also moves the QR's live limit counter.
 async function addAdjustment({ month, qr, amount, note }) {
   await db.runTransaction(async (tx) => {
-    const tRef = totalRef(month, qr.id);
-    const tSnap = await tx.get(tRef);
-    const t = tSnap.data() || {};
+    const live = await readLive(tx, qr.id);
     const now = Date.now();
-    tx.set(tRef, { month, qrId: qr.id, received: (Number(t.received) || 0) + amount, holds: pruneHolds(t.holds, now) });
+    putLive(tx, live, { received: round2((Number(live.data.received) || 0) + amount), holds: pruneHolds(live.data.holds, now) });
     tx.set(db.collection("entries").doc(), {
-      type: "adjustment", status: "received", qrId: qr.id, qrName: qr.name, upiId: qr.upiId, qrBilled: !!qr.billed,
+      type: "adjustment", status: "received", cycleStart: Number(live.data.cycleStartedAtMs) || 0, qrId: qr.id, qrName: qr.name, upiId: qr.upiId, qrBilled: !!qr.billed,
       amount, remark: "Adjustment", note: note || "", month,
       branch: ADMIN_EMAIL, branchId: "admin", branchName: "Owner",
       createdAt: FV.serverTimestamp(), createdAtMs: now, hasPhoto: false,
@@ -992,52 +1022,51 @@ async function addAdjustment({ month, qr, amount, note }) {
   });
 }
 
-// Safety net: rebuild every QR's month total from its received entries.
-async function recalcTotals(month, qrs) {
-  const snap = await db.collection("entries").where("month", "==", month).get();
-  const sums = {};
-  snap.forEach((d) => { const e = d.data(); if (e.status === "received") sums[e.qrId] = (sums[e.qrId] || 0) + (Number(e.amount) || 0); });
-  const ids = new Set([...qrs.map((q) => q.id), ...Object.keys(sums)]);
-  const batch = db.batch();
-  ids.forEach((id) => batch.set(totalRef(month, id), { month, qrId: id, received: Math.round((sums[id] || 0) * 100) / 100 }, { merge: true }));
-  await batch.commit();
+// Safety net: rebuild every QR's live counter from its received entries since its last reset.
+async function recalcTotals(qrs) {
+  for (const q of qrs) {
+    const snap = await db.collection("entries").where("qrId", "==", q.id).get();
+    await db.runTransaction(async (tx) => {
+      const live = await readLive(tx, q.id);
+      let sum = 0;
+      snap.forEach((d) => { const e = d.data(); if (e.status === "received" && inCycle(e, live.data)) sum += Number(e.amount) || 0; });
+      putLive(tx, live, { received: round2(sum), holds: pruneHolds(live.data.holds, Date.now()) });
+    });
+  }
 }
 
 // Owner bulk delete. Received entries become "deleted" and leave the QR
-// total; pending ones are cancelled and their hold released. One
-// transaction per QR-month so each total is updated exactly once.
+// counter (only if they were counted since the last reset); pending ones
+// are cancelled and their hold released. One transaction per QR.
 async function bulkDeleteEntries(entries, role) {
   const groups = {};
   entries.filter((e) => e.status === "received" || e.status === "pending").forEach((e) => {
-    const k = `${e.month}_${e.qrId}`;
-    (groups[k] = groups[k] || []).push(e);
+    (groups[e.qrId] = groups[e.qrId] || []).push(e);
   });
   let done = 0;
   for (const list of Object.values(groups)) {
     for (let i = 0; i < list.length; i += 200) {
       const chunk = list.slice(i, i + 200);
-      const { month, qrId } = chunk[0];
+      const { qrId } = chunk[0];
       await db.runTransaction(async (tx) => {
-        const tRef = totalRef(month, qrId);
-        const tSnap = await tx.get(tRef);
+        const live = await readLive(tx, qrId);
         const snaps = [];
         for (const e of chunk) snaps.push(await tx.get(db.doc(`entries/${e.id}`)));
-        const t = tSnap.data() || {};
         const now = Date.now();
-        const holds = pruneHolds(t.holds, now);
-        let received = Number(t.received) || 0;
+        const holds = pruneHolds(live.data.holds, now);
+        let received = Number(live.data.received) || 0;
         snaps.forEach((snap) => {
           if (!snap.exists) return;
           const e = snap.data();
           if (e.status === "received") {
-            received -= Number(e.amount) || 0;
+            if (inCycle(e, live.data)) received -= Number(e.amount) || 0;
             tx.update(snap.ref, { status: "deleted", deletedAmount: e.amount, editedAtMs: now, editedBy: role.name });
           } else if (e.status === "pending") {
             delete holds[snap.id];
             tx.update(snap.ref, { status: "cancelled", cancelledAtMs: now, editedBy: role.name });
           }
         });
-        tx.set(tRef, { month, qrId, received: Math.round(received * 100) / 100, holds });
+        putLive(tx, live, { received: round2(received), holds });
       });
       done += chunk.length;
     }
@@ -1083,6 +1112,22 @@ function useNow(everyMs = 30000) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), everyMs); return () => clearInterval(t); }, [everyMs]);
   return now;
+}
+// Reset button handler shared by the QR list, Dashboard and Reports.
+function useQrReset(role) {
+  const toast = useToast();
+  const ask = useConfirm();
+  return useCallback(async (q, total) => {
+    const u = usageFor(total, Date.now());
+    const ok = await ask({
+      title: `${q.name} ka limit reset karein?`,
+      body: `Abhi ${rupees(u.received)} use hua hai${u.held ? `, aur ${rupees(u.held)} pending payment reserve hai (woh bani rahegi)` : ""}. Reset ke baad counter 0 se shuru hoga. Purani entries aur reports waise hi rahenge.`,
+      okLabel: "Reset karo", icon: "arrow-counter-clockwise",
+    });
+    if (!ok) return false;
+    try { await resetQrLimit(q, role); toast(`${q.name} ka limit reset ho gaya.`); return true; }
+    catch (e) { toast(errMsg(e), true); return false; }
+  }, [role.email]);
 }
 function byQr(totals) { const m = {}; (totals || []).forEach((t) => { m[t.qrId] = t; }); return m; }
 
@@ -1562,7 +1607,7 @@ function ShowQr({ entry, qrs, totals, now, busy, onReceived, onCancel, onBack })
         {mode === "orig" && <div style={{ marginTop: 12 }}><Alert kind="info">Is QR mein customer ko amount khud daalna hoga: <b>{rupees(entry.amount)}</b></Alert></div>}
         {qr && <div style={{ marginTop: 14 }}>
           <div className="row tiny muted" style={{ marginBottom: 6 }}>
-            <span className="grow">Is mahine, is payment ke saath</span>
+            <span className="grow">Abhi tak, is payment ke saath</span>
             <span className="num">{rupees(u.used)} / {rupees(limit)}</span>
           </div>
           <UsageBar used={u.used} limit={limit} />
@@ -1766,7 +1811,7 @@ function MyEntriesTab({ role, now }) {
 /* =========================================================
    ADMIN: DASHBOARD
    ========================================================= */
-function QrUsageCard({ q, total, now, today, live }) {
+function QrUsageCard({ q, total, now, today, live, onReset }) {
   const u = usageFor(total, live ? now : 0);
   const off = !q.enabled, exp = isExpired(q, today);
   const lvl = levelFor(u.used, q.limit);
@@ -1790,11 +1835,20 @@ function QrUsageCard({ q, total, now, today, live }) {
         <span className="grow">{rupees(u.received)} received{u.held ? `, ${rupees(u.held)} pending` : ""}</span>
         <span><b style={{ color: "var(--ink-2)" }}>{pct(u.used, q.limit)}%</b> of {rupees(q.limit)}</span>
       </div>
+      {live && <div className="row tiny muted" style={{ marginTop: 10 }}>
+        <span className="grow">{resetNote(total)}</span>
+        {onReset && !q.archived && <button className="btn sm ghost" onClick={() => onReset(q, total)}><Icon n="arrow-counter-clockwise" />Reset</button>}
+      </div>}
     </div>
   );
 }
+function resetNote(total) {
+  if (total && total.lastReset) return `Last reset: ${fmtDateTime(total.lastReset.atMs)}`;
+  if (total && total.cycleStartedAtMs) return `Count shuru: ${fmtDate(dayKey(total.cycleStartedAtMs))}`;
+  return "Abhi tak reset nahi hua";
+}
 
-function Dashboard({ role, qrs, now }) {
+function Dashboard({ role, qrs, now, liveTotals }) {
   const toast = useToast();
   const ask = useConfirm();
   const [month, setMonth] = useState(monthKey(now));
@@ -1809,14 +1863,18 @@ function Dashboard({ role, qrs, now }) {
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState(null);   // Set of entry ids while in select mode
 
-  const totalsS = useSnapshot(() => db.collection("totals").where("month", "==", month), [month]);
+  const resetQr = useQrReset(role);
   const entriesS = useSnapshot(() => db.collection("entries").where("month", "==", month), [month]);
-  const tmap = byQr(totalsS.data);
   const all = (entriesS.data || []).slice().sort((a, b) => (b.createdAtMs || 0) - (a.createdAtMs || 0));
   const today = dayKey(now);
   const isCurrent = month === monthKey(now);
+  // This month: the live limit counter (since the last reset). Earlier months: what the QR received that month.
+  const liveMap = byQr(liveTotals);
+  const monthSum = {};
+  all.forEach((e) => { if (e.status === "received") monthSum[e.qrId] = (monthSum[e.qrId] || 0) + (Number(e.amount) || 0); });
+  const totalFor = (q) => (isCurrent ? liveMap[q.id] : { received: round2(monthSum[q.id] || 0), holds: {} });
 
-  const qrList = (qrs || []).filter((q) => !q.archived || (tmap[q.id] && Number(tmap[q.id].received))).sort((a, b) => {
+  const qrList = (qrs || []).filter((q) => !q.archived || Number((totalFor(q) || {}).received) || monthSum[q.id]).sort((a, b) => {
     const aa = a.enabled && !a.archived && !isExpired(a, today), bb = b.enabled && !b.archived && !isExpired(b, today);
     return (bb - aa) || b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0);
   });
@@ -1857,9 +1915,9 @@ function Dashboard({ role, qrs, now }) {
     finally { setBusy(false); }
   }
   async function recalc() {
-    if (!(await ask({ title: "Totals dobara calculate karein?", body: `${monthLabel(month)} ke saare QR totals entries se dobara banenge.`, okLabel: "Recalculate", icon: "arrows-clockwise" }))) return;
+    if (!(await ask({ title: "Totals dobara calculate karein?", body: "Har QR ka limit counter, last reset ke baad ki entries se dobara banega.", okLabel: "Recalculate", icon: "arrows-clockwise" }))) return;
     setBusy(true);
-    try { await recalcTotals(month, qrs || []); toast("Totals dobara calculate ho gaye."); }
+    try { await recalcTotals(qrs || []); toast("Totals dobara calculate ho gaye."); }
     catch (e) { toast(errMsg(e), true); }
     finally { setBusy(false); }
   }
@@ -1882,9 +1940,9 @@ function Dashboard({ role, qrs, now }) {
       </div>
 
       <div className="section-title">QR status</div>
-      {totalsS.loading ? <div className="card"><div className="skel" style={{ height: 14, width: "40%" }} /><div className="skel" style={{ height: 8, marginTop: 14 }} /></div>
+      {entriesS.loading ? <div className="card"><div className="skel" style={{ height: 14, width: "40%" }} /><div className="skel" style={{ height: 8, marginTop: 14 }} /></div>
         : !qrList.length ? <div className="card"><Empty icon="qr-code" title="Abhi koi QR nahi">QRs tab se add karein.</Empty></div>
-        : <div className="stagger">{qrList.map((q, i) => <div key={q.id} style={{ "--i": i }}><QrUsageCard q={q} total={tmap[q.id]} now={now} today={today} live={isCurrent} /></div>)}</div>}
+        : <div className="stagger">{qrList.map((q, i) => <div key={q.id} style={{ "--i": i }}><QrUsageCard q={q} total={totalFor(q)} now={now} today={today} live={isCurrent} onReset={resetQr} /></div>)}</div>}
 
       {Object.keys(branchSums).length > 0 && <>
         <div className="section-title">Branch-wise</div>
@@ -1999,9 +2057,11 @@ async function deleteQrForever(q) {
   await batch.commit();
 }
 
-function QrsTab({ qrs, settings, now }) {
+function QrsTab({ qrs, settings, now, role, totals }) {
   const toast = useToast();
   const ask = useConfirm();
+  const resetQr = useQrReset(role);
+  const totalMap = byQr(totals);
   const [editing, setEditing] = useState(null);   // qr object, or {} for new
   const [view, setView] = useState("main");        // main | archived
   const [busyId, setBusyId] = useState(null);
@@ -2042,6 +2102,8 @@ function QrsTab({ qrs, settings, now }) {
         {list.map((q, i) => {
           const exp = isExpired(q, today);
           const busy = busyId === q.id;
+          const total = totalMap[q.id];
+          const u = usageFor(total, now);
           return (
             <div className="card" key={q.id} style={{ "--i": i, padding: 14, marginTop: 12, opacity: q.archived ? 0.85 : 1 }}>
               <div className="row" style={{ alignItems: "flex-start" }}>
@@ -2062,6 +2124,14 @@ function QrsTab({ qrs, settings, now }) {
                   <span className="sl" onClick={() => !busy && toggleEnabled(q, !q.enabled)} />
                 </span>}
               </div>
+              {!q.archived && <div style={{ marginTop: 12 }}>
+                <UsageBar used={u.used} limit={q.limit} />
+                <div className="row tiny muted num" style={{ marginTop: 6 }}>
+                  <span className="grow">{rupees(u.received)} use hua{u.held ? `, ${rupees(u.held)} pending` : ""}</span>
+                  <span><b style={{ color: "var(--ink-2)" }}>{pct(u.used, q.limit)}%</b> of {rupees(q.limit)}</span>
+                </div>
+                <div className="tiny muted" style={{ marginTop: 2 }}>{resetNote(total)}</div>
+              </div>}
               <div className="btn-row" style={{ marginTop: 12 }}>
                 {q.archived ? <>
                   <button className="btn sm ghost" disabled={busy} onClick={() => restore(q)}><Icon n="arrow-counter-clockwise" />Restore</button>
@@ -2069,6 +2139,7 @@ function QrsTab({ qrs, settings, now }) {
                 </> : <>
                   <button className="btn sm ghost" disabled={busy} onClick={() => setEditing(q)}><Icon n="pencil-simple" />Edit</button>
                   <button className="btn sm ghost" disabled={busy} onClick={() => archive(q)}><Icon n="archive" />Archive</button>
+                  <button className="btn sm ghost" disabled={busy} onClick={() => resetQr(q, total)}><Icon n="arrow-counter-clockwise" />Reset</button>
                 </>}
               </div>
             </div>
@@ -2133,7 +2204,7 @@ function QrForm({ qr, onClose }) {
     const pa = upiId.trim();
     if (!name.trim()) { toast("QR ka naam daalein.", true); return; }
     if (!/^[\w.\-]+@[\w.\-]+$/.test(pa)) { toast("UPI ID sahi nahi lag rahi (jaise name@okhdfc).", true); return; }
-    if (!(limit > 0)) { toast("Monthly limit daalein.", true); return; }
+    if (!(limit > 0)) { toast("Limit daalein.", true); return; }
     if (expiryEnabled && !expiryDate) { toast("Expiry date chunein.", true); return; }
     if (isNew && !image) { toast("QR photo upload karein.", true); return; }
     setBusy(true);
@@ -2175,7 +2246,7 @@ function QrForm({ qr, onClose }) {
       <label className="field"><span className="lbl">Account holder ka naam</span><input className="input" value={payeeName} onChange={(e) => setPayeeName(e.target.value)} />
         <div className="hint">Customer ke UPI app mein yahi naam dikhega.</div>
       </label>
-      <label className="field"><span className="lbl">Monthly limit</span>
+      <label className="field"><span className="lbl">Limit (reset karne tak)</span>
         <div className="prefix-field"><span>₹</span><input className="input num" inputMode="numeric" placeholder="100000" value={limitStr} onChange={(e) => setLimitStr(e.target.value.replace(/[^0-9.,]/g, ""))} /></div>
         {parseAmount(limitStr) > 0 && <div className="hint num">{rupees(parseAmount(limitStr))}</div>}
       </label>
@@ -2449,7 +2520,7 @@ async function saveBlob(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function ReportsTab({ qrs, now }) {
+function ReportsTab({ role, qrs, now, liveTotals }) {
   const toast = useToast();
   const ask = useConfirm();
   const today = dayKey(now);
@@ -2463,21 +2534,28 @@ function ReportsTab({ qrs, now }) {
   const [busyId, setBusyId] = useState(null);
   useEffect(() => { setBank({}); }, [month]);   // typed bank totals belong to one month only
 
-  const totalsS = useSnapshot(() => db.collection("totals").where("month", "==", month), [month]);
+  const resetQr = useQrReset(role);
   const entriesS = useSnapshot(() => db.collection("entries").where("month", "==", month), [month]);
-  const tmap = byQr(totalsS.data);
+  const liveMap = byQr(liveTotals);
   const all = entriesS.data || [];
   const rec = all.filter((e) => e.status === "received");
   const sumOf = (arr) => round2(arr.reduce((a, e) => a + (Number(e.amount) || 0), 0));
   const grand = sumOf(rec), billedSum = sumOf(rec.filter((e) => e.qrBilled)), regularSum = round2(grand - billedSum);
   const pend = all.filter((e) => e.status === "pending");
   const isCurrent = month === monthKey(now);
-  const loading = totalsS.loading || entriesS.loading;
+  const loading = entriesS.loading;
 
-  const qrList = (qrs || []).filter((q) => !q.archived || (tmap[q.id] && Number(tmap[q.id].received)))
-    .sort((a, b) => b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0));
   const entrySum = {}; rec.forEach((e) => { entrySum[e.qrId] = (entrySum[e.qrId] || 0) + (Number(e.amount) || 0); });
-  const drift = qrList.filter((q) => Math.abs(round2(entrySum[q.id] || 0) - round2((tmap[q.id] || {}).received || 0)) > 0.5);
+  const totalFor = (q) => (isCurrent ? liveMap[q.id] : { received: round2(entrySum[q.id] || 0), holds: {} });
+  const qrList = (qrs || []).filter((q) => !q.archived || entrySum[q.id])
+    .sort((a, b) => b.limit - a.limit || (a.createdAtMs || 0) - (b.createdAtMs || 0));
+  // Counter vs entries can only be compared when every entry since the last reset falls inside this month.
+  const drift = !isCurrent ? [] : qrList.filter((q) => {
+    const l = liveMap[q.id];
+    if (!l || !(Number(l.cycleStartedAtMs) >= monthStartMs(month))) return false;
+    const expected = round2(rec.filter((e) => e.qrId === q.id && inCycle(e, l)).reduce((a, e) => a + (Number(e.amount) || 0), 0));
+    return Math.abs(expected - round2(l.received)) > 0.5;
+  });
   const branchSums = {}; rec.forEach((e) => { const b = e.branchName || "Owner"; branchSums[b] = (branchSums[b] || 0) + (Number(e.amount) || 0); });
 
   async function adjust(q, app, bankV, diff) {
@@ -2535,7 +2613,7 @@ function ReportsTab({ qrs, now }) {
       <div className="section-title">QR-wise final total</div>
       {loading ? <div className="card"><div className="skel" style={{ height: 14, width: "40%" }} /><div className="skel" style={{ height: 8, marginTop: 14 }} /></div>
         : !qrList.length ? <div className="card"><Empty icon="qr-code" title="Abhi koi QR nahi" /></div>
-        : <div className="stagger">{qrList.map((q, i) => <div key={q.id} style={{ "--i": i }}><QrUsageCard q={q} total={tmap[q.id]} now={now} today={today} live={isCurrent} /></div>)}</div>}
+        : <div className="stagger">{qrList.map((q, i) => <div key={q.id} style={{ "--i": i }}><QrUsageCard q={q} total={totalFor(q)} now={now} today={today} live={isCurrent} onReset={resetQr} /></div>)}</div>}
 
       {Object.keys(branchSums).length > 0 && <>
         <div className="section-title">Branch-wise</div>
@@ -2550,7 +2628,7 @@ function ReportsTab({ qrs, now }) {
       <div className="card" style={{ padding: "4px 16px" }}>
         <div className="hint" style={{ margin: "12px 0 0" }}>Har QR ke bank statement ka total daalo. App dikhayegi ki farak kitna hai, aur ek click mein Adjustment laga sakte ho.</div>
         {!qrList.length ? <Empty icon="bank" title="Koi QR nahi" /> : qrList.map((q) => {
-          const app = round2((tmap[q.id] || {}).received || 0);
+          const app = round2(entrySum[q.id] || 0);
           const raw = bank[q.id] || "";
           const bankV = parseAmount(raw);
           const has = raw !== "" && isFinite(bankV);
@@ -2610,7 +2688,26 @@ function Main({ role }) {
   const [inFlow, setInFlow] = useState(false);
   const settingsS = useSnapshot(() => db.doc("settings/global"), []);
   const qrsS = useSnapshot(() => db.collection("qrs"), []);
-  const totalsS = useSnapshot(() => db.collection("totals").where("month", "==", month), [month]);
+  // Limit counters: one live doc per QR. Until a QR has one (first use after the switch from
+  // monthly totals), the old doc of the current month stands in for it.
+  const liveS = useSnapshot(() => db.collection("totals").where("kind", "==", "live"), []);
+  const legacyS = useSnapshot(() => db.collection("totals").where("month", "==", month), [month]);
+  const usage = useMemo(() => {
+    const m = {};
+    (legacyS.data || []).forEach((t) => { m[t.qrId] = t; });
+    (liveS.data || []).forEach((t) => { m[t.qrId] = t; });
+    return Object.values(m);
+  }, [liveS.data, legacyS.data]);
+  const ensured = useRef({});
+  useEffect(() => {
+    if (!role.isAdmin || liveS.loading || qrsS.loading || !qrsS.data) return;
+    const have = new Set((liveS.data || []).map((t) => t.qrId));
+    qrsS.data.forEach((q) => {
+      if (have.has(q.id) || ensured.current[q.id]) return;
+      ensured.current[q.id] = true;
+      ensureLive(q.id).catch(() => { ensured.current[q.id] = false; });
+    });
+  }, [liveS.data, qrsS.data, role.isAdmin]);
   const settings = { ...DEFAULT_SETTINGS, ...(settingsS.data || {}) };
   const qrs = qrsS.data || [];
   useEffect(() => { document.body.classList.toggle("in-flow", inFlow); }, [inFlow]);
@@ -2623,11 +2720,11 @@ function Main({ role }) {
   let body;
   if (qrsS.loading || settingsS.loading) body = <div className="page"><div className="skel" style={{ height: 28, width: "70%", marginBottom: 16 }} /><div className="skel" style={{ height: 84, borderRadius: 18 }} /><div className="skel" style={{ height: 52, marginTop: 14, borderRadius: 14 }} /></div>;
   else if (qrsS.error) body = <div className="page"><Alert kind="red">{errMsg(qrsS.error)}</Alert></div>;
-  else if (tab === "receive") body = <ReceiveTab role={role} settings={settings} qrs={qrs} totals={totalsS.data} now={now} onFlowChange={setInFlow} />;
+  else if (tab === "receive") body = <ReceiveTab role={role} settings={settings} qrs={qrs} totals={usage} now={now} onFlowChange={setInFlow} />;
   else if (tab === "mine") body = <MyEntriesTab role={role} now={now} />;
-  else if (tab === "dash") body = <Dashboard role={role} qrs={qrs} now={now} />;
-  else if (tab === "reports") body = <ReportsTab qrs={qrs} now={now} />;
-  else if (tab === "qrs") body = <QrsTab qrs={qrs} settings={settings} now={now} />;
+  else if (tab === "dash") body = <Dashboard role={role} qrs={qrs} now={now} liveTotals={usage} />;
+  else if (tab === "reports") body = <ReportsTab role={role} qrs={qrs} now={now} liveTotals={usage} />;
+  else if (tab === "qrs") body = <QrsTab qrs={qrs} settings={settings} now={now} role={role} totals={usage} />;
   else if (tab === "settings") body = <SettingsTab settings={settings} role={role} />;
 
   return (

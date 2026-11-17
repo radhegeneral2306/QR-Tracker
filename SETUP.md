@@ -119,6 +119,16 @@ Agar kisi app mein amount prefill nahi hota, toh staff "Backup: original QR phot
 - **QR band karna:** thodi der ke liye band karna ho toh toggle off karo. Hamesha ke liye hatana ho toh **🗄️ Archive** karo. Archive karne se history bachi rehti hai aur QR wapas Restore bhi ho sakta hai.
 - **QR delete:** sirf Archived tab mein milta hai, aur sirf us QR pe chalta hai jispe kabhi koi entry nahi hui (galti se ya testing mein add kiye QR). Jis QR pe payment ho chuki hai, woh delete nahi hota, taaki purana hisaab na toote.
 
+## QR ka limit reset (haath se)
+
+- **Limit ab mahine ke saath apne aap reset nahi hota.** Har QR ka "use hua" amount badhta rehta hai, mahina badle tab bhi, jab tak Owner **Reset** na dabaye.
+- **Reset button** har QR ke saath hai (sirf Owner ko dikhta hai): QRs tab, Dashboard aur Reports tab ke QR cards mein. Dabane se pehle confirm poochta hai.
+- **Reset karne se kya hota hai:** sirf us QR ka limit counter 0 se shuru hota hai. Purani entries, reports aur month ka hisaab waise hi rehta hai. Jo payments abhi pending hain, woh reserve rehti hain. QR card pe "Last reset" ki tareekh dikhti hai.
+- **Reset se pehle ki entries:** unhe baad mein edit ya delete karne se counter nahi badalta (woh purani history hai). Reset ke baad ki entries counter badalti hain.
+- **Adjustment** (bank milaan) counter ko bhi badalta hai. **Recalculate** counter ko last reset ke baad ki entries se dobara banata hai.
+- Reports aur Dashboard ka **mahine wala total** (kitna aaya) alag cheez hai, woh hamesha entries se aata hai aur reset se nahi badalta.
+- Jab pehli baar yeh version chala, har QR ka counter us mahine ke total se aage chala (kuch achanak zero nahi hua). Chaaho toh us QR ka Reset dabake zero kar sakte ho.
+
 ## Merchant QR (HDFC SmartHub Vyapar jaise)
 
 - Do tarah ke QR hote hain. **Personal QR** (PhonePe, GPay waghera) mein `upi://pay?...` link hota hai. **Merchant QR** (HDFC SmartHub Vyapar, Paytm Soundbox waghera, jis pe merchant ka naam aur TID likha hota hai) mein "Bharat QR" format hota hai, jo `000201...` se shuru hota hai.
